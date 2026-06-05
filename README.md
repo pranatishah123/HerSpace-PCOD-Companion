@@ -1,4 +1,3 @@
-````md
 # 🌸 HerSpace — PCOD Awareness & Health Tracking Platform
 
 HerSpace is a women’s health-focused web platform designed to help users understand, track, and reflect on early body signals related to PCOD/PCOS.
@@ -19,13 +18,13 @@ HerSpace brings these body signals together in one place.
 
 The platform helps users:
 
-- Track period and cycle patterns
-- Record symptoms and lifestyle inputs
-- Understand PCOD awareness risk through zones
-- Track skin-related concerns
-- View a monthly PCOS health timeline
-- Generate insight cards based on recurring patterns
-- Prepare a consultation snapshot for doctor visits
+* Track period and cycle patterns
+* Record symptoms and lifestyle inputs
+* Understand PCOD awareness risk through zones
+* Track skin-related concerns
+* View a monthly PCOS health timeline
+* Generate insight cards based on recurring patterns
+* Prepare a consultation snapshot for doctor visits
 
 ---
 
@@ -47,21 +46,21 @@ The Rapid Fire PCOD Check is a quick question-based flow where users answer simp
 
 The questions are related to symptoms such as:
 
-- Irregular periods
-- Acne or skin issues
-- Weight changes
-- Hair fall or unwanted hair growth
-- Mood changes
-- Lifestyle habits
-- Pain or discomfort
+* Irregular periods
+* Acne or skin issues
+* Weight changes
+* Hair fall or unwanted hair growth
+* Mood changes
+* Lifestyle habits
+* Pain or discomfort
 
 Based on the responses, the system estimates a PCOD awareness zone.
 
 Example zones:
 
-- Low Risk
-- Moderate Risk
-- High Risk
+* Low Risk
+* Moderate Risk
+* High Risk
 
 This feature gives users a simple starting point to understand their body signals.
 
@@ -75,10 +74,10 @@ Every time a user completes the Rapid Fire PCOD Check, their zone result can be 
 
 This helps users understand whether their body signals are:
 
-- Improving
-- Stable
-- Getting worse
-- Repeating in a pattern
+* Improving
+* Stable
+* Getting worse
+* Repeating in a pattern
 
 The zone history becomes an important part of the Health Timeline.
 
@@ -90,13 +89,13 @@ The Period Tracker allows users to record menstrual cycle details.
 
 Users can track:
 
-- Cycle start date
-- Cycle end date
-- Flow level
-- Pain level
-- Cycle regularity
-- Symptoms
-- Notes
+* Cycle start date
+* Cycle end date
+* Flow level
+* Pain level
+* Cycle regularity
+* Symptoms
+* Notes
 
 This feature helps users understand their menstrual patterns over time.
 
@@ -110,12 +109,12 @@ The Skin Analyzer helps users track visible skin-related changes.
 
 Users can add skin entries related to:
 
-- Acne
-- Oily skin
-- Pigmentation
-- Breakouts
-- Skin condition changes
-- Other skin concerns
+* Acne
+* Oily skin
+* Pigmentation
+* Breakouts
+* Skin condition changes
+* Other skin concerns
 
 Skin health is included because hormonal imbalance can often reflect through skin-related symptoms.
 
@@ -129,37 +128,35 @@ The PCOS Health Timeline is one of the main new features of HerSpace.
 
 It creates a month-wise visual summary of the user’s health journey by combining data from:
 
-- Zone Tracker
-- Period Tracker
-- Skin Analyzer
-- Symptoms
-- Notes
+* Zone Tracker
+* Period Tracker
+* Skin Analyzer
+* Symptoms
+* Notes
 
 Each month appears as a timeline card that shows the user’s overall PCOD-related health signals.
 
 Each timeline card can include:
 
-- Month name
-- PCOD awareness zone
-- Cycle status
-- Flow level
-- Pain level
-- Skin condition
-- Symptoms
-- Short monthly insight
+* Month name
+* PCOD awareness zone
+* Cycle status
+* Flow level
+* Pain level
+* Skin condition
+* Symptoms
+* Short monthly insight
 
 This helps users see their body patterns more clearly instead of checking every feature separately.
 
 Example timeline card:
 
-```txt
 January 2026
 Zone: Moderate Risk
 Cycle: Irregular
 Pain: High
 Skin: Acne breakout
 Insight: Cycle irregularity and skin breakout appeared together.
-````
 
 ---
 
@@ -171,17 +168,11 @@ Instead of showing only raw entries, the system highlights meaningful patterns.
 
 Example insights:
 
-```txt
 Your cycle irregularity appeared frequently in the last few months.
-```
 
-```txt
 Skin breakouts and high-risk zone appeared in the same month.
-```
 
-```txt
 Pain levels seem to be reducing compared to previous entries.
-```
 
 Insight Cards help users understand trends quickly and clearly.
 
@@ -237,7 +228,6 @@ The Consultation Snapshot helps users present their health journey in an organiz
 
 ## 📁 Project Structure
 
-```bash
 HerSpace-build-a-thon/
 │
 ├── client/
@@ -259,7 +249,6 @@ HerSpace-build-a-thon/
 │
 ├── README.md
 └── package.json
-```
 
 ---
 
@@ -358,22 +347,16 @@ sequenceDiagram
 
 ### GitHub Repository
 
-```txt
-https://github.com/pranatishah123/HerSpace-build-a-thon
-```
+[HerSpace GitHub Repository](https://github.com/pranatishah123/HerSpace-build-a-thon)
 
 ### Live Demo
 
-```txt
 Frontend Live Link: Add Netlify link here
 Backend API Link: Add backend deployed link here
-```
 
 ### Demo Video
 
-```txt
 Demo Video Link: Add demo video link here
-```
 
 ---
 
@@ -381,25 +364,19 @@ Demo Video Link: Add demo video link here
 
 ### 1. Clone the Repository
 
-```bash
-git clone https://github.com/pranatishah123/HerSpace-build-a-thon.git
+git clone [https://github.com/pranatishah123/HerSpace-build-a-thon.git](https://github.com/pranatishah123/HerSpace-build-a-thon.git)
 cd HerSpace-build-a-thon
-```
 
 ---
 
 ### 2. Install Frontend Dependencies
 
-```bash
 cd client
 npm install
-```
 
 Run frontend:
 
-```bash
 npm run dev
-```
 
 ---
 
@@ -407,16 +384,12 @@ npm run dev
 
 Open a new terminal and run:
 
-```bash
 cd server
 npm install
-```
 
 Run backend:
 
-```bash
 npm run dev
-```
 
 ---
 
@@ -424,17 +397,13 @@ npm run dev
 
 Create a `.env` file inside the backend or server folder.
 
-```env
 PORT=5000
 MONGO_URI=your_mongodb_connection_string
 JWT_SECRET=your_jwt_secret
-```
 
 Create a `.env` file inside the client folder if needed.
 
-```env
 VITE_API_BASE_URL=your_backend_api_url
-```
 
 ---
 
@@ -442,53 +411,39 @@ VITE_API_BASE_URL=your_backend_api_url
 
 ### Authentication Routes
 
-```http
 POST /api/auth/register
 POST /api/auth/login
-```
 
 ### Rapid Fire / Zone Tracker Routes
 
-```http
 POST /api/zones
 GET /api/zones/me
-```
 
 ### Period Tracker Routes
 
-```http
 POST /api/period
 GET /api/period/me
-```
 
 ### Skin Analyzer Routes
 
-```http
 POST /api/skin
 GET /api/skin/me
-```
 
 ### Health Timeline Route
 
-```http
 GET /api/timeline/me
-```
 
 This endpoint aggregates zone history, period history, skin entries, symptoms, and notes into a month-wise health timeline.
 
 ### Insight Cards Route
 
-```http
 GET /api/insights/me
-```
 
 This endpoint generates pattern-based observations from the user’s health data.
 
 ### Consultation Snapshot Route
 
-```http
 GET /api/snapshot/me
-```
 
 This endpoint creates a summarized health report that can be shared during doctor consultation.
 
@@ -496,19 +451,17 @@ This endpoint creates a summarized health report that can be shared during docto
 
 ## 🧠 Simple Data Flow
 
-```txt
 User Inputs
-   ↓
+↓
 Rapid Fire PCOD Check / Period Tracker / Skin Analyzer
-   ↓
+↓
 MongoDB Storage
-   ↓
+↓
 Timeline Aggregator API
-   ↓
+↓
 Insight Cards + Consultation Snapshot
-   ↓
+↓
 Frontend Visual Dashboard
-```
 
 ---
 
@@ -529,14 +482,12 @@ Each card can include:
 
 Example:
 
-```txt
 January 2026
 Zone: Moderate Risk
 Cycle: Irregular
 Pain: High
 Skin: Acne breakout
 Insight: Cycle irregularity and skin breakout appeared together.
-```
 
 ---
 
@@ -581,9 +532,8 @@ Users should consult a certified doctor or gynecologist for medical concerns.
 
 **Pranati Shah**
 
-GitHub: [Pranati Shah ](https://github.com/pranatishah123)
-
-LinkedIn: [Pranati Shah ](https://www.linkedin.com/in/pranatishah13/)
+GitHub: [Pranati Shah GitHub](https://github.com/pranatishah123)
+LinkedIn: [Pranati Shah LinkedIn](https://www.linkedin.com/in/pranatishah13/)
 
 ---
 
@@ -606,6 +556,3 @@ Latest planned / added features:
 HerSpace is built with the belief that women should not have to ignore their body signals or remember every symptom alone.
 
 By combining tracking, visual timelines, and simple insights, HerSpace helps users understand their health journey with more clarity and confidence.
-
-```
-```
