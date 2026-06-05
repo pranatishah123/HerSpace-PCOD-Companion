@@ -532,8 +532,8 @@ Users should consult a certified doctor or gynecologist for medical concerns.
 
 **Pranati Shah**
 
-GitHub: [Pranati Shah GitHub](https://github.com/pranatishah123)
-LinkedIn: [Pranati Shah LinkedIn](https://www.linkedin.com/in/pranatishah13/)
+GitHub: [pranatishah123](https://github.com/pranatishah123)
+LinkedIn: [Pranati Shah](https://www.linkedin.com/in/pranatishah13/)
 
 ---
 
