@@ -9,8 +9,8 @@ import Dashboard from "./pages/Dashboard";
 import LearnMore from "./pages/LearnMore";
 // ── CHANGE 1 ── Import ZoneReport
 import ZoneReport from "./pages/ZoneReport";
-import DoctorConnect from "./pages/DoctorConnect";
 import DoctorDashboard from "./pages/DoctorDashboard";
+import DoctorLogin from "./pages/DoctorLogin";
 import ContactPage from "./pages/Contact";
 
 
@@ -205,12 +205,32 @@ function AboutPage() {
   );
 }
 
-function AuthPage({ screen, onSwitch, onLoginSuccess, onLoginFail }) {
+const ROLE_KEY = "herspaceRole";
+const DOCTOR_AUTH_KEY = "doctorAuth";
+const DOCTOR_AUTH_COOKIE = "herspaceDoctorAuth";
+const getStoredRole = () => window.localStorage.getItem(ROLE_KEY);
+const setStoredRole = (role) => window.localStorage.setItem(ROLE_KEY, role);
+const clearStoredRole = () => window.localStorage.removeItem(ROLE_KEY);
+const getCookieValue = (name) =>
+  document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${name}=`))
+    ?.split("=")[1] || "";
+const hasDoctorSession = () =>
+  window.localStorage.getItem(DOCTOR_AUTH_KEY) === "true" ||
+  getCookieValue(DOCTOR_AUTH_COOKIE) === "true";
+const clearDoctorSession = () => {
+  window.localStorage.removeItem(DOCTOR_AUTH_KEY);
+  document.cookie = `${DOCTOR_AUTH_COOKIE}=; Max-Age=0; path=/; SameSite=Lax`;
+};
+
+function AuthPage({ screen, onSwitch, onLoginSuccess, onLoginFail, onDoctorLogin }) {
   return screen === "login"
     ? <Login
         onLoginSuccess={onLoginSuccess}
         onLoginFail={onLoginFail}
         onGoSignup={() => onSwitch("signup")}
+        onDoctorLogin={onDoctorLogin}
       />
     : <Signup
         onSignupSuccess={() => onSwitch("login")}
@@ -247,18 +267,47 @@ export default function App() {
   const [authScreen, setAuthScreen]   = useState("signup");
   const [authChecked, setAuthChecked] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+  const [routePath, setRoutePath]     = useState(() => window.location.pathname);
   // ── CHANGE 2 ── Add zoneReportData state
   const [zoneReportData, setZoneReportData] = useState(null);
-  const [doctorPatientData, setDoctorPatientData] = useState(null);
+
+  const isDoctorAuthed = () =>
+    (getStoredRole() === "doctor" || getCookieValue(DOCTOR_AUTH_COOKIE) === "true") && hasDoctorSession();
+  const goToPatientRoute = ({ replace = false } = {}) => {
+    window.history[replace ? "replaceState" : "pushState"]({}, "", "/");
+    setRoutePath("/");
+  };
+  const goToDoctorRoute = (path, { replace = false } = {}) => {
+    window.history[replace ? "replaceState" : "pushState"]({}, "", path);
+    setRoutePath(path);
+  };
+
+  useEffect(() => {
+    const syncPath = () => setRoutePath(window.location.pathname);
+    window.addEventListener("popstate", syncPath);
+    return () => window.removeEventListener("popstate", syncPath);
+  }, []);
 
   useEffect(() => {
     const checkSession = async () => {
+      if ((getStoredRole() === "doctor" || getCookieValue(DOCTOR_AUTH_COOKIE) === "true") && hasDoctorSession()) {
+        setStoredRole("doctor");
+        goToDoctorRoute("/doctor-dashboard", { replace: true });
+        setAuthChecked(true);
+        return;
+      }
+      if (window.location.pathname === "/doctor-login" || window.location.pathname === "/doctor-dashboard") {
+        setAuthChecked(true);
+        return;
+      }
       try {
         const res = await fetch("http://localhost:5000/api/auth/me", {
           credentials: "include",
         });
         if (res.ok) {
           const user = await res.json();
+          setStoredRole("patient");
+          clearDoctorSession();
           setCurrentUser(user);
           setActive("dashboard");
         } else {
@@ -274,6 +323,34 @@ export default function App() {
     checkSession();
   }, []);
 
+  useEffect(() => {
+    const role = getStoredRole();
+    const doctorAuth = hasDoctorSession();
+
+    if (routePath === "/doctor-dashboard") {
+      if (role === "patient") {
+        goToPatientRoute({ replace: true });
+        setActive(currentUser ? "dashboard" : "home");
+        return;
+      }
+      if (role !== "doctor" || !doctorAuth) {
+        window.history.replaceState({}, "", "/doctor-login");
+        setRoutePath("/doctor-login");
+      }
+      return;
+    }
+
+    if (routePath === "/doctor-login" && role === "patient") {
+      goToPatientRoute({ replace: true });
+      setActive(currentUser ? "dashboard" : "home");
+      return;
+    }
+
+    if (routePath === "/" && role === "doctor" && doctorAuth) {
+      goToDoctorRoute("/doctor-dashboard", { replace: true });
+    }
+  }, [routePath, currentUser]);
+
   const handleLoginSuccess = async () => {
     try {
       const res = await fetch("http://localhost:5000/api/auth/me", {
@@ -281,6 +358,8 @@ export default function App() {
       });
       if (res.ok) {
         const user = await res.json();
+        setStoredRole("patient");
+        clearDoctorSession();
         setCurrentUser(user);
         setActive("dashboard");
       }
@@ -299,11 +378,54 @@ export default function App() {
     } catch (err) {
       console.error("Logout error:", err);
     }
+    clearStoredRole();
+    clearDoctorSession();
     setCurrentUser(null);
     setActive("home");
   };
 
   if (!authChecked) return <LoadingScreen />;
+
+  if ((routePath === "/doctor-login" || routePath === "/doctor-dashboard") && getStoredRole() === "patient") {
+    return <LoadingScreen />;
+  }
+
+  if (routePath === "/doctor-login") {
+    return (
+      <DoctorLogin
+        onLoginSuccess={() => goToDoctorRoute("/doctor-dashboard", { replace: true })}
+        onBack={() => {
+          clearStoredRole();
+          goToPatientRoute({ replace: true });
+        }}
+      />
+    );
+  }
+
+  if (routePath === "/doctor-dashboard" && !isDoctorAuthed()) {
+    return (
+      <DoctorLogin
+        onLoginSuccess={() => goToDoctorRoute("/doctor-dashboard", { replace: true })}
+        onBack={() => {
+          clearStoredRole();
+          goToPatientRoute({ replace: true });
+        }}
+      />
+    );
+  }
+
+  if (routePath === "/doctor-dashboard") {
+    return (
+      <DoctorDashboard
+        onBack={() => goToDoctorRoute("/doctor-login")}
+        onLogout={() => {
+          clearStoredRole();
+          clearDoctorSession();
+          goToDoctorRoute("/doctor-login", { replace: true });
+        }}
+      />
+    );
+  }
 
   // ── FULL PAGE ROUTES ───────────────────────────────────────────────────────
   if (active === "learnmore")
@@ -314,37 +436,11 @@ export default function App() {
     return (
       <ZoneReport
         result={zoneReportData}
+        currentUser={currentUser}
         onGoToDashboard={() => {
           setZoneReportData(null);
           setActive("dashboard");
         }}
-        onGoToDoctorConnect={(trackerPayload) => {
-          setDoctorPatientData({
-            name: currentUser?.name || "Current User",
-            email: currentUser?.email || "",
-            current: trackerPayload?.current || trackerPayload || null,
-            tracker: trackerPayload || null,
-          });
-          setActive("doctor_connect");
-        }}
-      />
-    );
-  }
-
-  if (active === "doctor_connect") {
-    return (
-      <DoctorConnect
-        onBack={() => setActive("dashboard")}
-        onOpenDoctorDashboard={() => setActive("doctor_dashboard")}
-      />
-    );
-  }
-
-  if (active === "doctor_dashboard") {
-    return (
-      <DoctorDashboard
-        fallbackPatient={doctorPatientData}
-        onBack={() => setActive("doctor_connect")}
       />
     );
   }
@@ -378,6 +474,10 @@ export default function App() {
         onSwitch={(s) => setAuthScreen(s)}
         onLoginSuccess={handleLoginSuccess}
         onLoginFail={() => setActive("home")}
+        onDoctorLogin={() => {
+          setStoredRole("doctor");
+          goToDoctorRoute("/doctor-login");
+        }}
       />
     },
   ];
@@ -409,6 +509,15 @@ export default function App() {
             <div style={S.authBtns}>
               <button style={S.loginBtn} onClick={() => { setAuthScreen("login"); setActive("auth"); }}>
                 Login
+              </button>
+              <button
+                style={S.doctorBtn}
+                onClick={() => {
+                  setStoredRole("doctor");
+                  goToDoctorRoute("/doctor-login");
+                }}
+              >
+                Doctor Dashboard
               </button>
               <button style={S.signupBtn} onClick={() => { setAuthScreen("signup"); setActive("auth"); }}>
                 Sign Up
@@ -467,6 +576,11 @@ const S = {
   loginBtn: {
     padding: "8px 20px", border: "2px solid #CD2C58", borderRadius: "25px",
     background: "transparent", color: "#CD2C58", fontWeight: "600", cursor: "pointer", fontSize: "13px",
+  },
+  doctorBtn: {
+    padding: "8px 20px", border: "2px solid #CD2C58", borderRadius: "25px",
+    background: "transparent", color: "#CD2C58", fontWeight: "600", cursor: "pointer", fontSize: "13px",
+    whiteSpace: "nowrap",
   },
   signupBtn: {
     padding: "8px 20px", border: "none", borderRadius: "25px",

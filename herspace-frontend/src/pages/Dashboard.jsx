@@ -8,9 +8,7 @@ import PeriodTracker from "./PeriodTracker";
 import SkinAnalyzer from "./Skinanalyzer";
 import PersonalizedDashboard from "./PersonalizedDashboard";
 import ZoneReport from "./ZoneReport";
-import DoctorConnect from "./DoctorConnect";
-import DoctorDashboard from "./DoctorDashboard";
-
+import HealthTimeline from "./HealthTimeline";
 const API = "http://localhost:5000/api";
 
 const ZONES = [
@@ -226,7 +224,6 @@ export default function Dashboard({ onLogout, onGoToZoneReport, currentUser }) {
   const [userData,     setUserData]     = useState(null);
   const [loading,      setLoading]      = useState(true);
   const [completeness, setCompleteness] = useState(null);
-  const [doctorPatientData, setDoctorPatientData] = useState(null);
 
   // ── On mount: fetch profile + check completeness ──────────────────────────
   useEffect(() => {
@@ -294,7 +291,7 @@ export default function Dashboard({ onLogout, onGoToZoneReport, currentUser }) {
     else if (dest === "period")  setPage("periodtracker");
     else if (dest === "skin")    setPage("skinanalyzer");
     else if (dest === "zones")   setPage("zones_dashboard");
-    else if (dest === "doctor_connect") setPage("doctor_connect");
+    else if (dest === "doctor_connect") setPage("zones_dashboard");
     else if (dest === "profile") setPage("viewprofile");
     else setPage("dashboard");
   };
@@ -350,39 +347,17 @@ export default function Dashboard({ onLogout, onGoToZoneReport, currentUser }) {
     return <SkinAnalyzer onBack={refreshAndGoDashboard} />;
   }
 
+  if (page === "timeline") {
+  return <HealthTimeline onBack={refreshAndGoDashboard} />;
+  }
+
   if (page === "zones_dashboard") {
     // Open zone dashboard even if there's no fresh RapidFire result
     return (
       <ZoneReport
         result={null}
         onGoToDashboard={refreshAndGoDashboard}
-        onGoToDoctorConnect={(trackerPayload) => {
-          setDoctorPatientData({
-            name: currentUser?.name || userData?.name || "Current User",
-            email: currentUser?.email || "",
-            current: trackerPayload?.current || trackerPayload || null,
-            tracker: trackerPayload || null,
-          });
-          setPage("doctor_connect");
-        }}
-      />
-    );
-  }
-
-  if (page === "doctor_connect") {
-    return (
-      <DoctorConnect
-        onBack={refreshAndGoDashboard}
-        onOpenDoctorDashboard={() => setPage("doctor_dashboard")}
-      />
-    );
-  }
-
-  if (page === "doctor_dashboard") {
-    return (
-      <DoctorDashboard
-        fallbackPatient={doctorPatientData}
-        onBack={() => setPage("doctor_connect")}
+        currentUser={currentUser || userData}
       />
     );
   }
@@ -437,15 +412,18 @@ export default function Dashboard({ onLogout, onGoToZoneReport, currentUser }) {
 
       <div style={D.page}>
 
-        {onLogout && (
-          <div style={D.topNav}>
-            <button onClick={onLogout} className="logout-btn" style={D.logoutBtn}>
-              🚪 Logout
-            </button>
+         {onLogout && (
+         <div style={D.topNav}>
+         <button onClick={() => setPage("viewprofile")} className="logout-btn" style={{...D.logoutBtn, marginRight:"12px"}}>
+         👤
+          </button>
+          <button onClick={onLogout} className="logout-btn" style={D.logoutBtn}>
+         🚪 Logout
+          </button>
           </div>
-        )}
+          )}
 
-        {/* ── Progress strip ── */}
+        {/* ── Progress strip ── */}""
         {completeness && !completeness.allDone && incompleteTasks.length > 0 && (
           <div className="du0" style={{background:"rgba(255,255,255,0.55)",backdropFilter:"blur(24px)",borderRadius:"22px",padding:"20px 24px",boxShadow:"0 6px 28px rgba(181,101,167,0.12)",border:"1px solid rgba(255,255,255,0.7)",marginBottom:"-4px"}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:"14px",flexWrap:"wrap",gap:"8px"}}>
@@ -508,34 +486,24 @@ export default function Dashboard({ onLogout, onGoToZoneReport, currentUser }) {
               Your personal wellness companion for hormonal balance and lifestyle health.
             </p>
             <div style={D.heroBtns}>
-              <button
-                className="btn-primary assess-btn"
-                style={D.primaryBtn}
-                onClick={handleStartAssessment}
-                disabled={loading}
-              >
-                {loading ? "⏳ Loading..." : userData ? "🔥 Start RapidFire" : "📋 About You"}
-              </button>
-              <button className="btn-primary" style={D.primaryBtn} onClick={() => setPage("viewprofile")}>
-                👤 View Profile
-              </button>
-              <button className="btn-primary" style={D.primaryBtn} onClick={() => setPage("periodtracker")}>
-                🗓️ Track Periods
-              </button>
-              <button className="btn-primary" style={D.primaryBtn} onClick={() => setPage("skinanalyzer")}>
-                🔬 Skin Analyzer
-              </button>
-              {/* ✅ My Dashboard button — same gradient as all other buttons */}
-              {completeness?.allDone && (
-                <button
-                  className="btn-primary"
-                  onClick={() => setPage("personalized")}
-                  style={D.primaryBtn}
-                >
-                  ✨ My Dashboard
-                </button>
-              )}
-            </div>
+            <button
+            className="btn-primary assess-btn"
+            style={D.primaryBtn}
+            onClick={handleStartAssessment}
+            disabled={loading}
+          >
+          {loading ? "⏳ Loading..." : userData ? "🔥 Start RapidFire" : "📋 About You"}
+          </button>
+          <button className="btn-primary" style={D.primaryBtn} onClick={() => setPage("periodtracker")}>
+          🗓️ Track Periods
+          </button>
+          <button className="btn-primary" style={D.primaryBtn} onClick={() => setPage("skinanalyzer")}>
+          🔬 Skin Analyzer
+          </button>
+          <button className="btn-primary" style={D.primaryBtn} onClick={() => setPage("timeline")}>
+          📊 Health Timeline
+          </button>
+          </div>
           </div>
           <div className="float-sticker" style={D.heroRight}>
             <img src={sticker} alt="guide" style={D.heroSticker} />

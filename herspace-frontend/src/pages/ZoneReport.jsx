@@ -6,6 +6,31 @@ import highImg     from "../assets/zones/Support Sensitivity.jpeg";
 
 const API = "http://localhost:5000/api";
 const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
+const CONSULTATION_REQUESTS_KEY = "herspaceConsultationRequests";
+
+function readConsultationRequests() {
+  try {
+    return JSON.parse(window.localStorage.getItem(CONSULTATION_REQUESTS_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function saveConsultationRequest(request) {
+  const existing = readConsultationRequests();
+  const idx = existing.findIndex((item) => String(item.patientId) === String(request.patientId));
+  const next = idx >= 0
+    ? existing.map((item, i) => (i === idx ? { ...item, ...request } : item))
+    : [request, ...existing];
+  window.localStorage.setItem(CONSULTATION_REQUESTS_KEY, JSON.stringify(next));
+}
+
+function hasConsultationRequest(patientId) {
+  return readConsultationRequests().some(
+    (item) => String(item.patientId) === String(patientId) && item.status === "requested"
+  );
+}
+
 const AI_MODELS = [
   "google/gemma-3-4b-it:free",
   "google/gemma-3-12b-it:free",
@@ -351,28 +376,19 @@ function MiniCheckinModal({ zc, onClose, onSubmit }) {
   );
 }
 
-function ZoneDashboard({ tracker, zc, daysData, onMiniCheckin, onFullCheckin, onGoToDoctorConnect, riskLoopCount = 0 }) {
+function ZoneDashboard({ tracker, zc, daysData, onMiniCheckin, onFullCheckin, currentUser }) {
   const [showMiniModal,  setShowMiniModal]  = useState(false);
   const [localTracker,   setLocalTracker]   = useState(tracker);
   const [localDays,      setLocalDays]      = useState(daysData);
   const [aiPlan,         setAiPlan]         = useState(null);
   const [aiPlanLoading,  setAiPlanLoading]  = useState(false);
-  const [careAdvice,     setCareAdvice]     = useState("");
-  const [careLoading,    setCareLoading]    = useState(false);
-  const [forceDoctorCta, setForceDoctorCta] = useState(() => {
-    try {
-      return window.localStorage.getItem("doctorCtaTestMode") === "1";
-    } catch {
-      return false;
-    }
-  });
+  const [consultSubmitted, setConsultSubmitted] = useState(false);
 
   useEffect(() => { setLocalTracker(tracker); }, [tracker]);
   useEffect(() => { setLocalDays(daysData); },   [daysData]);
 
   const current       = localTracker?.current      || {};
   const actionPlan    = localTracker?.actionPlan   || null;
-  const doctorRequest = localTracker?.doctorRequest || {};
   const previousSnapshot = localTracker?.history?.[0] || null;
 
   const daysUntilFull = localDays?.daysUntilFull ?? 14;
@@ -387,12 +403,56 @@ function ZoneDashboard({ tracker, zc, daysData, onMiniCheckin, onFullCheckin, on
   const stability      = actionPlan?.stabilityScore || "Stable";
   const stabilityColor = stability==="Improving"?"#1D9E75":stability==="Worsening"?"#A32D2D":"#BA7517";
   const stabilityEmoji = stability==="Improving"?"📈":stability==="Worsening"?"📉":"➡️";
-  const trackerRiskCount = (localTracker?.riskEvents || []).filter((event) => event.level === "high").length;
-  const highRiskCount = Math.max(riskLoopCount, trackerRiskCount);
-  const isDoctorEligibleZone = currZone === "moderate" || currZone === "high";
-  const showDoctor = forceDoctorCta ||  (isDoctorEligibleZone && (highRiskCount >= 2 || doctorRequest?.triggered));
   const effectivePlan = aiPlan || actionPlan;
   const totalAssessments = (localTracker?.history?.length || 0) + (current?.zone ? 1 : 0);
+  const patientId = currentUser?.id || currentUser?._id || localTracker?.userId || "local-patient";
+  const patientName = currentUser?.name || localTracker?.patientName || "Current User";
+
+  useEffect(() => {
+    setConsultSubmitted(hasConsultationRequest(patientId));
+  }, [patientId]);
+
+  const submitConsultationRequest = () => {
+    const createdAt = new Date().toISOString();
+    const request = {
+      id: `consult-${patientId}-${Date.now()}`,
+      patientId,
+      userId: patientId,
+      patientName,
+      name: patientName,
+      email: currentUser?.email || "",
+      zone: currZone,
+      zoneName: zc.label,
+      zoneDisplayName: zc.label,
+      wellnessScore: current.finalScore ?? 0,
+      maxScore: current.maxScore ?? 120,
+      confidence: current.confidencePct ?? 0,
+      confidencePct: current.confidencePct ?? 0,
+      detectedSymptoms: current.detectedSymptoms || [],
+      createdAt,
+      status: "requested",
+      doctorRequest: {
+        triggered: true,
+        status: "requested",
+        requestedAt: createdAt,
+      },
+      current: {
+        ...current,
+        zone: currZone,
+        finalScore: current.finalScore ?? 0,
+        maxScore: current.maxScore ?? 120,
+        confidencePct: current.confidencePct ?? 0,
+        detectedSymptoms: current.detectedSymptoms || [],
+      },
+      actionPlan: localTracker?.actionPlan || null,
+      patterns: localTracker?.patterns || [],
+      history: localTracker?.history || [],
+      miniCheckin: localTracker?.miniCheckin || null,
+      riskEvents: localTracker?.riskEvents || [],
+    };
+    saveConsultationRequest(request);
+    setConsultSubmitted(true);
+  };
 
   useEffect(() => {
     if (!current?.zone || !OPENROUTER_KEY) {
@@ -442,50 +502,6 @@ Return ONLY valid JSON:
       alive = false;
     };
   }, [current.zone, current.finalScore, current.detectedSymptoms, localTracker?.miniCheckin, stability]);
-
-  useEffect(() => {
-    if (!showDoctor) {
-      setCareAdvice("");
-      return;
-    }
-
-    if (!OPENROUTER_KEY) {
-      setCareAdvice(buildCareFallback(currZone, highRiskCount));
-      return;
-    }
-
-    let alive = true;
-    setCareLoading(true);
-
-    runAIJson(
-      [{
-        role: "user",
-        content: `Write a warm, human-sounding wellness note for a woman in a PCOD app.
-Current zone: ${currZone}
-High-risk loop count: ${highRiskCount}
-Doctor already triggered: ${doctorRequest?.triggered ? "yes" : "no"}
-
-Return ONLY valid JSON:
-{
-  "message": "2 to 3 compassionate sentences saying special care is needed now and that speaking with a doctor is the right next step"
-}`,
-      }],
-      (parsed) => typeof parsed?.message === "string" && parsed.message.trim().length > 0
-    )
-      .then((parsed) => {
-        if (alive) setCareAdvice(parsed.message.trim());
-      })
-      .catch(() => {
-        if (alive) setCareAdvice(buildCareFallback(currZone, highRiskCount));
-      })
-      .finally(() => {
-        if (alive) setCareLoading(false);
-      });
-
-    return () => {
-      alive = false;
-    };
-  }, [currZone, doctorRequest?.triggered, highRiskCount, showDoctor]);
 
   const gc = {
     background:"rgba(255,255,255,0.62)",backdropFilter:"blur(24px)",WebkitBackdropFilter:"blur(24px)",
@@ -560,7 +576,7 @@ Return ONLY valid JSON:
       {/* Stats row */}
       <div className="fade-up delay-1" style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"14px",marginBottom:"16px"}}>
         {[
-          {icon:"📊",label:"Risk Score",        value:`${current.finalScore??0}`, sub:`/${current.maxScore??120}`, color:zc.lightColor,  glow:zc.glowColor},
+          {icon:"📊",label:"Wellness Score",    value:`${current.finalScore??0}`, sub:`/${current.maxScore??120}`, color:zc.lightColor,  glow:zc.glowColor},
           {icon:"📋",label:"Total Assessments", value:`${totalAssessments}`,       sub:"completed",                color:"#667eea",      glow:"rgba(102,126,234,0.3)"},
           {icon:stabilityEmoji,label:"Stability",value:stability,                  sub:"zone trend",               color:stabilityColor, glow:`${stabilityColor}44`},
         ].map((s,i)=>(
@@ -654,13 +670,21 @@ Return ONLY valid JSON:
           <div style={{padding:"12px 16px",borderRadius:"12px",background:zc.gradSoft,border:`1px solid ${zc.border}`,marginBottom:"16px"}}>
             <p style={{margin:0,fontSize:"13px",color:zc.color,fontWeight:"700",lineHeight:1.6}}>
               {currZone === "moderate" 
-                ? "Professional guidance can help clarify your symptoms and create a personalized treatment plan." 
-                : "Given your assessment results, we strongly recommend scheduling a consultation to discuss your health and next steps."}
+                ? "Professional guidance can help review your symptoms and prepare clear next steps." 
+                : "Given your assessment results, a consultation can help review your wellness summary and next steps."}
             </p>
           </div>
-          <button onClick={() => onGoToDoctorConnect && onGoToDoctorConnect(localTracker)} style={{width:"100%",padding:"12px 18px",border:"none",borderRadius:"12px",background:zc.grad,color:"#fff",fontWeight:"800",fontSize:"13px",cursor:"pointer",fontFamily:"'Nunito',sans-serif",boxShadow:`0 4px 12px ${zc.glowColor}`,transition:"all 0.2s ease"}}>
-            Connect with Dr. Lata Singh 👩‍⚕️
+          <button onClick={submitConsultationRequest} disabled={consultSubmitted} style={{width:"100%",padding:"12px 18px",border:"none",borderRadius:"12px",background:consultSubmitted?"linear-gradient(135deg,#1D9E75,#5b9e8a)":zc.grad,color:"#fff",fontWeight:"800",fontSize:"13px",cursor:consultSubmitted?"default":"pointer",fontFamily:"'Nunito',sans-serif",boxShadow:`0 4px 12px ${consultSubmitted?"rgba(29,158,117,0.28)":zc.glowColor}`,transition:"all 0.2s ease"}}>
+            {consultSubmitted ? "Consultation request submitted" : "Request consultation with Dr. Lata Singh 👩‍⚕️"}
           </button>
+          {consultSubmitted && (
+            <div style={{marginTop:"12px",padding:"12px 14px",borderRadius:"12px",background:"rgba(29,158,117,0.1)",border:"1px solid rgba(29,158,117,0.2)",color:"#1a6b4a",fontSize:"12px",fontWeight:"800",lineHeight:1.6,fontFamily:"'Nunito',sans-serif"}}>
+              Consultation request submitted. Dr. Lata Singh will receive your wellness summary for review.
+            </div>
+          )}
+          <div style={{marginTop:"12px",fontSize:"11px",color:"rgba(0,0,0,0.42)",lineHeight:1.7,fontWeight:"600"}}>
+            HerSpace supports early awareness and consultation preparation. It does not diagnose or replace medical advice.
+          </div>
         </div>
       )}
 
@@ -689,64 +713,6 @@ Return ONLY valid JSON:
               {zoneImproved?"🎉 Great progress! Your zone has improved since your last assessment.":zoneWorsened?"⚠️ Your zone has worsened. Consider the action plan and consult your doctor.":"➡️ Your zone remains unchanged. Stay consistent with your wellness plan."}
             </p>
           </div>
-        </div>
-      )}
-
-      {!showDoctor && (
-        <div className="fade-up delay-3" style={{...gc, background:"linear-gradient(135deg,rgba(255,236,236,0.8),rgba(255,247,243,0.8))", border:"1px solid rgba(196,94,138,0.2)", display:"flex", alignItems:"center", justifyContent:"space-between", gap:"12px", flexWrap:"wrap"}}>
-          <div>
-            <div style={{fontSize:"10px",fontWeight:"900",color:"#c45e8a",fontFamily:"'Nunito',sans-serif",letterSpacing:"2px",marginBottom:"3px"}}>TEST MODE</div>
-            <div style={{fontSize:"13px",fontWeight:"600",color:"rgba(0,0,0,0.6)",fontFamily:"'DM Sans',sans-serif"}}>
-              Need to test doctor flow now? Enable test mode to show doctor CTA instantly.
-            </div>
-          </div>
-          <button
-            onClick={() => onGoToDoctorConnect && onGoToDoctorConnect(localTracker)}
-            className="primary-btn"
-            style={{padding:"10px 18px",border:"none",borderRadius:"12px",background:"linear-gradient(135deg,#c45e8a,#e88ab8)",color:"#fff",fontWeight:"800",fontSize:"12px",cursor:"pointer",fontFamily:"'Nunito',sans-serif"}}
-          >
-            Doctor Test
-          </button>
-        </div>
-      )}
-
-      {/* Doctor CTA */}
-      {showDoctor && (
-        <div className="fade-up delay-4" style={{...gc,background:"linear-gradient(135deg,rgba(255,225,225,0.85),rgba(255,240,235,0.78))",border:"1.5px solid rgba(163,45,45,0.22)",display:"flex",alignItems:"center",justifyContent:"space-between",gap:"20px",flexWrap:"wrap"}}>
-          <div style={{position:"absolute",top:"-20px",right:"-20px",width:"100px",height:"100px",background:"rgba(163,45,45,0.25)",filter:"blur(30px)",borderRadius:"50%",opacity:0.35,pointerEvents:"none"}}/>
-          <div style={{display:"flex",alignItems:"center",gap:"14px",flex:1,minWidth:0,position:"relative"}}>
-            <div style={{width:"44px",height:"44px",borderRadius:"12px",background:"linear-gradient(135deg,#A32D2D,#E24B4A)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"20px",flexShrink:0}}>👩‍⚕️</div>
-            <div>
-              <div style={{fontSize:"11px",fontWeight:"900",color:"#A32D2D",fontFamily:"'Nunito',sans-serif",letterSpacing:"2px",marginBottom:"3px"}}>CONSULT A DOCTOR</div>
-              <div style={{marginBottom:"8px",padding:"10px 12px",borderRadius:"12px",background:"rgba(255,255,255,0.62)",border:"1px solid rgba(163,45,45,0.12)"}}>
-                <div style={{fontSize:"10px",fontWeight:"900",color:"#A32D2D",fontFamily:"'Nunito',sans-serif",letterSpacing:"1.5px",marginBottom:"4px"}}>AI CARE NOTE</div>
-                <div style={{fontSize:"12.5px",fontWeight:"600",color:"rgba(0,0,0,0.58)",fontFamily:"'DM Sans',sans-serif",lineHeight:1.6}}>
-                  {careLoading ? "Writing a gentle care note for you..." : careAdvice || buildCareFallback(currZone, highRiskCount)}
-                </div>
-              </div>
-              {doctorRequest?.triggered && (
-                <div style={{fontSize:"13px",fontWeight:"600",color:"rgba(0,0,0,0.6)",fontFamily:"'DM Sans',sans-serif",lineHeight:1.5}}>
-                  {doctorRequest.doctorResponse || "Our wellness team will review your symptoms and respond within 24 hours."}
-                </div>
-              )}
-            </div>
-          </div>
-          {!doctorRequest?.triggered&&(
-            <div style={{display:"flex",gap:"8px",flexShrink:0,position:"relative"}}>
-              <button onClick={() => onGoToDoctorConnect && onGoToDoctorConnect(localTracker)} style={{padding:"10px 18px",border:"none",borderRadius:"12px",color:"#fff",fontWeight:"800",fontSize:"12px",cursor:"pointer",fontFamily:"'Nunito',sans-serif",background:"linear-gradient(135deg,#25D366,#128C7E)",whiteSpace:"nowrap"}}>👩‍⚕️ Connect with Doctor</button>
-              {forceDoctorCta && (
-                <button
-                  onClick={() => {
-                    setForceDoctorCta(false);
-                    try { window.localStorage.removeItem("doctorCtaTestMode"); } catch {}
-                  }}
-                  style={{padding:"10px 14px",border:"1px solid rgba(0,0,0,0.14)",borderRadius:"12px",background:"rgba(255,255,255,0.8)",color:"rgba(0,0,0,0.6)",fontWeight:"800",fontSize:"12px",cursor:"pointer",fontFamily:"'Nunito',sans-serif",whiteSpace:"nowrap"}}
-                >
-                  Disable Test
-                </button>
-              )}
-            </div>
-          )}
         </div>
       )}
 
@@ -844,7 +810,7 @@ Return ONLY valid JSON:
   );
 }
 
-export default function ZoneReport({ result, onGoToDashboard, onGoToDoctorConnect }) {
+export default function ZoneReport({ result, onGoToDashboard, currentUser }) {
   const [part,         setPart]         = useState(1);
   const [showConfetti, setShowConfetti] = useState(false);
   const [tracker,      setTracker]      = useState(null);
@@ -915,9 +881,6 @@ export default function ZoneReport({ result, onGoToDashboard, onGoToDoctorConnec
   const score         = viewResult.score ?? viewResult.finalScore ?? 0;
   const maxScore      = viewResult.maxScore ?? 120;
   const confidencePct = viewResult.confidencePct ?? 0;
-  const persistentRisk = viewResult.persistentRisk || false;
-  const showPersistentRiskDoctorCta =
-    persistentRisk && (activeZone === "moderate" || activeZone === "high");
   const lifestyleAnswers = viewResult.result?.lifestyleAnswers || viewResult.lifestyleAnswers || [];
 
   // ✅ Sync called ONCE, guarded by syncedRef
@@ -980,7 +943,7 @@ export default function ZoneReport({ result, onGoToDashboard, onGoToDoctorConnec
               <img src={zc.bgImage} alt={zc.label} style={{width:"110px",height:"110px",objectFit:"cover",borderRadius:"18px",border:"3px solid rgba(255,255,255,0.95)",boxShadow:`0 8px 28px rgba(0,0,0,0.15), 0 0 0 1px ${zc.border}`,display:"block",position:"relative"}}/>
               <div style={{position:"absolute",bottom:"-8px",left:"50%",transform:"translateX(-50%)",background:zc.grad,borderRadius:"20px",padding:"3px 12px",fontSize:"10px",fontWeight:"900",color:"#fff",fontFamily:"'Nunito',sans-serif",whiteSpace:"nowrap"}}>{zc.badge}</div>
             </div>
-            <div style={{fontSize:"9px",fontWeight:"900",color:"rgba(0,0,0,0.3)",fontFamily:"'Nunito',sans-serif",letterSpacing:"2.5px",marginBottom:"8px",marginTop:"12px"}}>YOUR PCOD RISK ZONE</div>
+            <div style={{fontSize:"9px",fontWeight:"900",color:"rgba(0,0,0,0.3)",fontFamily:"'Nunito',sans-serif",letterSpacing:"2.5px",marginBottom:"8px",marginTop:"12px"}}>YOUR PCOD WELLNESS ZONE</div>
             <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:"8px",marginBottom:"8px"}}>
               <span style={{fontSize:"22px"}}>{zc.emoji}</span>
               <span style={{fontSize:"20px",fontWeight:"900",color:zc.color,fontFamily:"'Nunito',sans-serif"}}>{zc.label}</span>
@@ -1009,7 +972,7 @@ export default function ZoneReport({ result, onGoToDashboard, onGoToDoctorConnec
           <div style={{fontSize:"9px",fontWeight:"900",color:"rgba(0,0,0,0.28)",fontFamily:"'Nunito',sans-serif",letterSpacing:"2.5px",marginBottom:"14px"}}>BREAKDOWN</div>
           <StatBar label="Confidence Score"  value={confidencePct}   displayValue={`${confidencePct}%`} max={100}      color={zc.lightColor} glowColor={zc.glowColor}/>
           <StatBar label="Symptoms Detected" value={detected.length} displayValue={detected.length}     max={8}        color="#b565a7"        glowColor="rgba(181,101,167,0.3)"/>
-          <StatBar label="Risk Score"        value={score}           displayValue={score}               max={maxScore} color={zc.lightColor} glowColor={zc.glowColor}/>
+          <StatBar label="Wellness Score"    value={score}           displayValue={score}               max={maxScore} color={zc.lightColor} glowColor={zc.glowColor}/>
 
           <div style={{height:"1px",background:"linear-gradient(90deg,transparent,rgba(0,0,0,0.1),transparent)",margin:"16px 0"}}/>
 
@@ -1039,7 +1002,7 @@ export default function ZoneReport({ result, onGoToDashboard, onGoToDoctorConnec
                 <div style={{position:"absolute",top:"-30px",right:"-30px",width:"200px",height:"200px",background:zc.glowColor,filter:"blur(60px)",borderRadius:"50%",opacity:0.3,pointerEvents:"none"}}/>
                 <div style={{display:"flex",alignItems:"center",gap:"16px",marginBottom:"16px",position:"relative"}}>
                   <div style={{padding:"6px 16px",borderRadius:"30px",background:zc.gradSoft,border:`1px solid ${zc.border}`,fontSize:"11px",fontWeight:"900",color:zc.color,fontFamily:"'Nunito',sans-serif",letterSpacing:"1px"}}>{zc.emoji} {zc.badge}</div>
-                  <div style={{fontSize:"10px",fontWeight:"700",color:"rgba(0,0,0,0.3)",fontFamily:"'Nunito',sans-serif",letterSpacing:"2px"}}>PCOD RISK ASSESSMENT RESULT</div>
+                  <div style={{fontSize:"10px",fontWeight:"700",color:"rgba(0,0,0,0.3)",fontFamily:"'Nunito',sans-serif",letterSpacing:"2px"}}>PCOD WELLNESS ASSESSMENT RESULT</div>
                 </div>
                 <h1 style={{fontFamily:"'Playfair Display',serif",fontSize:"clamp(28px,3.5vw,40px)",fontWeight:"900",color:"#1a1a2e",margin:"0 0 12px",lineHeight:1.15}}>
                   {zc.label} <span style={{color:zc.color}}>Zone</span>
@@ -1054,7 +1017,7 @@ export default function ZoneReport({ result, onGoToDashboard, onGoToDoctorConnec
                 {[
                   {icon:"🎯",label:"Confidence",     val:`${confidencePct}%`,      sub:"Assessment accuracy",    color:zc.color,      glow:zc.glowColor},
                   {icon:"🩺",label:"Symptoms Found", val:`${detected.length} / 8`, sub:"PCOD indicators",        color:"#b565a7",     glow:"rgba(181,101,167,0.3)"},
-                  {icon:"📊",label:"Risk Score",     val:`${score}`,               sub:`out of ${maxScore} max`, color:zc.lightColor, glow:zc.glowColor},
+                  {icon:"📊",label:"Wellness Score", val:`${score}`,               sub:`out of ${maxScore} max`, color:zc.lightColor, glow:zc.glowColor},
                 ].map((s,i)=>(
                   <div key={i} style={{...gc,textAlign:"center",padding:"24px 20px",marginBottom:0}}>
                     <div style={{position:"absolute",top:"-10px",right:"-10px",width:"60px",height:"60px",background:s.glow,filter:"blur(20px)",borderRadius:"50%",opacity:0.4}}/>
@@ -1115,7 +1078,7 @@ export default function ZoneReport({ result, onGoToDashboard, onGoToDoctorConnec
               </div>
 
               <div className="fade-up delay-2" style={{...gc,marginBottom:"16px"}}>
-                {sL("📊","PCOD RISK METER")}
+                {sL("📊","PCOD WELLNESS METER")}
                 <RiskMeter score={score} maxScore={maxScore} color={zc.color} glowColor={zc.glowColor}/>
               </div>
 
@@ -1140,23 +1103,6 @@ export default function ZoneReport({ result, onGoToDashboard, onGoToDoctorConnec
                 </div>
               )}
 
-              {showPersistentRiskDoctorCta&&(
-                <div className="fade-up delay-3" style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"20px",background:"linear-gradient(135deg,rgba(255,225,225,0.85),rgba(255,240,235,0.78))",backdropFilter:"blur(20px)",borderRadius:"18px",padding:"18px 24px",border:`1.5px solid ${zc.border}`,marginBottom:"16px",position:"relative",overflow:"hidden"}}>
-                  <div style={{position:"absolute",top:"-20px",right:"-20px",width:"100px",height:"100px",background:zc.glowColor,filter:"blur(30px)",borderRadius:"50%",opacity:0.35,pointerEvents:"none"}}/>
-                  <div style={{display:"flex",alignItems:"center",gap:"14px",flex:1,minWidth:0}}>
-                    <div style={{width:"44px",height:"44px",borderRadius:"12px",background:`linear-gradient(135deg,${zc.color},${zc.lightColor})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:"20px",flexShrink:0}}>⚠️</div>
-                    <div>
-                      <div style={{fontSize:"11px",fontWeight:"900",color:zc.color,fontFamily:"'Nunito',sans-serif",letterSpacing:"2px",marginBottom:"3px"}}>PERSISTENT RISK DETECTED</div>
-                      <div style={{fontSize:"13.5px",fontWeight:"600",color:"rgba(0,0,0,0.65)",fontFamily:"'DM Sans',sans-serif",lineHeight:1.5}}>You've landed in the <strong style={{color:zc.color}}>same zone 2+ times</strong> — this strongly suggests consulting a gynecologist soon.</div>
-                    </div>
-                  </div>
-                  <div style={{display:"flex",gap:"8px",flexShrink:0}}>
-                    <button onClick={() => onGoToDoctorConnect && onGoToDoctorConnect(tracker)} style={{padding:"10px 18px",border:"none",borderRadius:"12px",color:"#fff",fontWeight:"800",fontSize:"12px",cursor:"pointer",fontFamily:"'Nunito',sans-serif",background:"linear-gradient(135deg,#25D366,#128C7E)",whiteSpace:"nowrap"}}>👩‍⚕️ Connect with Doctor</button>
-                    <button onClick={()=>window.open("https://www.practo.com/","_blank")} style={{padding:"10px 18px",border:"none",borderRadius:"12px",color:"#fff",fontWeight:"800",fontSize:"12px",cursor:"pointer",fontFamily:"'Nunito',sans-serif",background:`linear-gradient(135deg,${zc.color},${zc.lightColor})`,whiteSpace:"nowrap"}}>📅 Book</button>
-                  </div>
-                </div>
-              )}
-
               <AIInsightsSection
                 zc={zc}
                 zoneKey={activeZone}
@@ -1168,15 +1114,14 @@ export default function ZoneReport({ result, onGoToDashboard, onGoToDoctorConnec
 
               <div className="fade-up delay-5" style={{display:"flex",gap:"12px",alignItems:"flex-start",background:"rgba(255,255,255,0.35)",borderRadius:"16px",padding:"16px 20px",border:"1px solid rgba(255,255,255,0.65)",marginBottom:"16px"}}>
                 <span style={{fontSize:"16px",flexShrink:0}}>🔒</span>
-                <p style={{margin:0,fontSize:"11px",color:"rgba(0,0,0,0.35)",lineHeight:1.75,fontWeight:"500"}}><strong style={{color:"rgba(0,0,0,0.45)"}}>Disclaimer:</strong> This is a wellness screening tool, not a medical diagnosis. Always consult a qualified gynecologist for professional advice.</p>
+                <p style={{margin:0,fontSize:"11px",color:"rgba(0,0,0,0.35)",lineHeight:1.75,fontWeight:"500"}}><strong style={{color:"rgba(0,0,0,0.45)"}}>Disclaimer:</strong> HerSpace supports early awareness and consultation preparation. It does not diagnose or replace medical advice.</p>
               </div>
             </div>
           )}
 
           {/* PART 3 */}
           {part===3&&tracker&&(
-            <ZoneDashboard tracker={tracker} zc={zc} daysData={daysData} riskLoopCount={(tracker?.riskEvents || []).filter((event) => event.level === "high").length}
-              onGoToDoctorConnect={onGoToDoctorConnect}
+            <ZoneDashboard tracker={tracker} zc={zc} daysData={daysData} currentUser={currentUser}
               onMiniCheckin={(data)=>{
                 if(data.tracker) setTracker(data.tracker);
                 if(data.daysUntilMini!==undefined) setDaysData({daysSinceFull:data.daysSinceFull,daysSinceMini:data.daysSinceMini,daysUntilMini:data.daysUntilMini,daysUntilFull:data.daysUntilFull});

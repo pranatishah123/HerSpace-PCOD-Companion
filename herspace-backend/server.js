@@ -14,6 +14,8 @@ const periodTrackerRoutes = require("./routes/periodTrackerRoutes");
 const zonesTrackerRoutes  = require("./routes/zonesTrackerRoutes");
 const wellnessRoutes      = require("./routes/Wellnessroutes");
 const doctorRoutes        = require("./routes/doctorRoutes");
+const timelineRoutes      = require("./routes/timeline");              // ← ADD
+
 
 const app = express();
 
@@ -48,6 +50,7 @@ app.use("/api/period",    periodTrackerRoutes);
 app.use("/api/zones",     zonesTrackerRoutes);
 app.use("/api/wellness",  wellnessRoutes);
 app.use("/api/doctor",    doctorRoutes);
+app.use("/api/timeline",  timelineRoutes);
 
 app.get("/", (req, res) => res.send("HerSpace Backend Running ✅"));
 

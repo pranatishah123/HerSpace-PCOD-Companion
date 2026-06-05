@@ -1,5 +1,8 @@
 const PeriodTracker = require("../models/PeriodTracker");
-const fetch = require("node-fetch"); // make sure node-fetch is installed
+const fetch = (...args) =>
+  typeof globalThis.fetch === "function"
+    ? globalThis.fetch(...args)
+    : import("node-fetch").then(({ default: nodeFetch }) => nodeFetch(...args));
 
 // ── Helper: cycle length string → number ─────────────────────────────────────
 function parseCycleDays(cycleLength) {
@@ -302,6 +305,12 @@ const AI_MODELS = [
 ];
 
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+const aiDebug = (...args) => {
+  if (process.env.DEBUG_AI === "true") console.log(...args);
+};
+const aiDebugWarn = (...args) => {
+  if (process.env.DEBUG_AI === "true") console.warn(...args);
+};
 
 async function tryModel(model, prompt, apiKey) {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -374,16 +383,16 @@ Each tip should be 1 warm, actionable sentence. All tips must be PCOD-specific a
   // Pass 1 — try all models
   for (const model of AI_MODELS) {
     try {
-      console.log("🤖 Trying model:", model);
+      aiDebug("Trying AI model:", model);
       const text  = await tryModel(model, prompt, apiKey);
       const clean = text.replace(/```json|```/g, "").trim();
       const parsed = JSON.parse(clean);
       if (parsed.diet && parsed.movement && parsed.selfCare) {
-        console.log("✅ Success with:", model);
+        aiDebug("AI model succeeded:", model);
         return parsed;
       }
     } catch (e) {
-      console.warn("⚠️ Failed:", model, e.message);
+      aiDebugWarn("AI model failed:", model, e.message);
       lastErr = e;
       if (e.is429) rateLimited.push(model);
     }
@@ -391,7 +400,7 @@ Each tip should be 1 warm, actionable sentence. All tips must be PCOD-specific a
 
   // Pass 2 — retry rate-limited models after 4s
   if (rateLimited.length > 0) {
-    console.log("⏳ Retrying rate-limited models in 4s…");
+    aiDebug("Retrying rate-limited AI models in 4s");
     await sleep(4000);
     for (const model of rateLimited) {
       try {
@@ -432,12 +441,6 @@ const savePeriodTracker = async (req, res) => {
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    if (parsedLastPeriod < currentMonthStart) {
-      return res.status(400).json({
-        message: "Date must be from the current month onward.",
-      });
-    }
     if (parsedLastPeriod > today) {
       return res.status(400).json({
         message: "Future dates are not allowed. Please select a date up to today.",
@@ -658,7 +661,7 @@ const submitWeeklyCheckin = async (req, res) => {
           apiKey,
         });
       } catch (aiErr) {
-        console.error("AI action plan generation failed:", aiErr.message);
+        aiDebugWarn("OpenRouter unavailable, using local action plan fallback:", aiErr.message);
         // Fall through — we'll save fallback plan below
       }
     }

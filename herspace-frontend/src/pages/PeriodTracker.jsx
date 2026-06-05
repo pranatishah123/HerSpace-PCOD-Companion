@@ -468,6 +468,12 @@ const AI_MODELS = [
 ];
 
 const sleep = (ms) => new Promise(res => setTimeout(res, ms));
+const aiDebug = (...args) => {
+  if (import.meta.env.VITE_DEBUG_AI === "true") console.log(...args);
+};
+const aiDebugWarn = (...args) => {
+  if (import.meta.env.VITE_DEBUG_AI === "true") console.warn(...args);
+};
 
 async function tryAIModel(model, messages, key) {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -495,9 +501,75 @@ async function tryAIModel(model, messages, key) {
   return data?.choices?.[0]?.message?.content || "[]";
 }
 
+function getLocalWellnessRecommendations(trackerData = {}, phase = "Luteal", comparison = null) {
+  const phaseBased = {
+    Menstrual: [
+      "Prioritise warm meals with iron-rich foods like spinach, lentils, dates, or beans to support energy during your period.",
+      "Keep movement gentle today: slow walks, stretching, or rest are enough if cramps or fatigue are present.",
+    ],
+    Follicular: [
+      "Use this higher-energy phase for steady strength training or brisk walks, while keeping meals protein-rich for better cravings control.",
+      "Add colourful vegetables, curd, sprouts, or fermented foods to support gut health and hormone balance.",
+    ],
+    Ovulation: [
+      "Keep hydration high and include fibre-rich foods like vegetables, oats, fruits, and seeds to support hormone clearance.",
+      "If your energy feels good, this is a good window for slightly more intense movement such as strength, dance, or cardio.",
+    ],
+    Luteal: [
+      "Choose complex carbs like oats, sweet potato, dal, and millet with protein to reduce cravings and support steady energy.",
+      "Protect sleep and reduce late-night screen time, because the luteal phase can make mood, bloating, and cravings more sensitive.",
+    ],
+  };
+
+  const recs = [...(phaseBased[phase] || phaseBased.Luteal)];
+  const cycleLength = String(trackerData.cycleLength || "").toLowerCase();
+  const spotting = String(trackerData.spotting || "").toLowerCase();
+  const skin = String(trackerData.skin || "").toLowerCase();
+  const hair = String(trackerData.hair || "").toLowerCase();
+  const sleep = String(trackerData.sleep || "").toLowerCase();
+  const pain = String(trackerData.pain || "").toLowerCase();
+
+  if (cycleLength.includes("35") || String(trackerData.regularity || "").toLowerCase().includes("unpredictable")) {
+    recs.push("Track cycle dates, spotting, sleep, and cravings for the next two weeks so your patterns are easier to discuss in consultation.");
+  }
+  if (spotting.includes("often") || spotting.includes("sometimes")) {
+    recs.push("Note any spotting with the date and flow level, and avoid skipping meals so blood sugar stays more stable.");
+  }
+  if (skin.includes("acne") || skin.includes("severe") || hair.includes("facial") || hair.includes("thinning")) {
+    recs.push("Keep meals lower in added sugar and pair carbs with protein, as skin and hair changes can be sensitive to insulin and androgen patterns.");
+  }
+  if (sleep.includes("less") || sleep.includes("poor") || sleep.includes("disturbed")) {
+    recs.push("Set a simple wind-down routine tonight: dim lights, no phone for 30 minutes, and a calming drink if it suits you.");
+  }
+  if (pain.includes("severe") || pain.includes("moderate")) {
+    recs.push("Use heat support, gentle stretching, and anti-inflammatory foods like ginger or turmeric when pain feels noticeable.");
+  }
+  if (comparison?.hasImprovement) {
+    recs.push("Your cycle notes show some progress, so keep the habits that felt realistic instead of adding too many new changes at once.");
+  } else if (comparison) {
+    recs.push("Since patterns changed this cycle, keep this week simple: regular meals, hydration, sleep timing, and light movement.");
+  }
+
+  const steadyTips = [
+    "Aim for one balanced plate today: protein, fibre-rich carbs, vegetables, and healthy fats.",
+    "Take a 10-minute walk after one meal to support blood sugar and digestion.",
+    "Keep caffeine later in the day low if bloating, anxiety, or sleep disturbance is present.",
+    "Write down one symptom note today so your monthly timeline stays accurate.",
+  ];
+
+  const unique = [...new Set(recs.filter(Boolean))];
+  let i = 0;
+  while (unique.length < 4) {
+    unique.push(steadyTips[i % steadyTips.length]);
+    i += 1;
+  }
+  return unique.slice(0, 4);
+}
+
 async function fetchAIRecommendations(trackerData, phase, comparison, ageGroup) {
+  const fallback = getLocalWellnessRecommendations(trackerData, phase, comparison);
   const key = import.meta.env.VITE_OPENROUTER_API_KEY;
-  if (!key) return null;
+  if (!key || typeof fetch !== "function") return fallback;
 
   const prevText = comparison
     ? `Previous cycle: regularity=${comparison.previousCycle?.regularity}, cycleLength=${comparison.previousCycle?.cycleLength}, flow=${comparison.previousCycle?.flow}, pain=${comparison.previousCycle?.pain}`
@@ -533,23 +605,23 @@ Example: ["tip1", "tip2", "tip3", "tip4"]`,
 
   for (const model of AI_MODELS) {
     try {
-      console.log("🤖 Trying:", model);
+      aiDebug("Trying AI model:", model);
       const text  = await tryAIModel(model, messages, key);
       const clean = text.replace(/```json|```/g, "").trim();
       const arr   = JSON.parse(clean);
       if (Array.isArray(arr) && arr.length) {
-        console.log("✅ Success with:", model);
+        aiDebug("AI model succeeded:", model);
         return arr;
       }
     } catch (e) {
-      console.warn("⚠️ Failed:", model, e.message);
+      aiDebugWarn("AI model failed:", model, e.message);
       lastErr = e;
       if (e.is429) rateLimited.push(model);
     }
   }
 
   if (rateLimited.length > 0) {
-    console.log("⏳ Retrying rate-limited models in 4s…");
+    aiDebug("Retrying rate-limited AI models in 4s");
     await sleep(4000);
     for (const model of rateLimited) {
       try {
@@ -563,7 +635,8 @@ Example: ["tip1", "tip2", "tip3", "tip4"]`,
     }
   }
 
-  throw lastErr || new Error("All models unavailable");
+  aiDebugWarn("Using local wellness recommendations:", lastErr?.message || "All models unavailable");
+  return fallback;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -602,11 +675,8 @@ export default function PeriodTracker({ userData, onBack }) {
   };
   const now = new Date();
   const todayStr  = formatDateInput(now);
-  const currentMonthStartStr = formatDateInput(
-    new Date(now.getFullYear(), now.getMonth(), 1)
-  );
   const isLastPeriodAllowed = (dateStr) =>
-    !!dateStr && dateStr >= currentMonthStartStr && dateStr <= todayStr;
+    !!dateStr && dateStr <= todayStr;
 
   const [view,        setView]        = useState("loading");
   const [animDir,     setAnimDir]     = useState("next");
@@ -729,7 +799,7 @@ export default function PeriodTracker({ userData, onBack }) {
 
   const handleManualNext = () => {
     if (step === 1 && !isLastPeriodAllowed(form.lastPeriod)) {
-      setError("Please select a date from this month up to today 🌸");
+      setError("Please select today or any past date for your last period 🌸");
       return;
     }
     if (!canGoNext()) { setError("Please select an option to continue 🌸"); return; }
@@ -1147,15 +1217,11 @@ export default function PeriodTracker({ userData, onBack }) {
               {step===1 && (
                 <div style={{marginTop:"8px"}}>
                   <input type="date" value={form.lastPeriod}
-                    min={currentMonthStartStr} max={todayStr}
+                    max={todayStr}
                     onClick={e=>e.target.showPicker?.()}
                     onChange={e=>{
                       const v=e.target.value;
                       if(!v) return;
-                      if (v < currentMonthStartStr) {
-                        setError("Please select a date from this month 🌸");
-                        return;
-                      }
                       if (v > todayStr) {
                         setError("Future dates are not allowed for last period 🌸");
                         return;
@@ -1166,7 +1232,7 @@ export default function PeriodTracker({ userData, onBack }) {
                     }}
                     style={S.dateInput}/>
                   <p style={{fontSize:"11px",color:"#a07030",textAlign:"center",marginTop:"10px",fontWeight:"600"}}>
-                    📅 Tap to open calendar · select a date from this month up to today
+                    📅 Tap to open calendar · select today or any past date
                   </p>
                   {form.lastPeriod && (
                     <div style={{textAlign:"center",marginTop:"8px",fontSize:"13px",color:"#b87000",fontWeight:"800",fontFamily:"'Nunito',sans-serif"}}>
@@ -1323,8 +1389,16 @@ function CycleDashboard({ data, onBack, onUpdate, onWeeklyCheckin, ageKey, onRef
     aiFetched.current = true;
     setAiLoading(true);
     fetchAIRecommendations(data.trackerData, data.phase, data.comparison || null, ageKey)
-      .then(recs => { if (recs) setAiRecs(recs); else setAiError(true); setAiLoading(false); })
-      .catch(() => { setAiError(true); setAiLoading(false); });
+      .then(recs => {
+        setAiRecs(recs?.length ? recs : getLocalWellnessRecommendations(data.trackerData, data.phase, data.comparison || null));
+        setAiError(false);
+        setAiLoading(false);
+      })
+      .catch(() => {
+        setAiRecs(getLocalWellnessRecommendations(data.trackerData, data.phase, data.comparison || null));
+        setAiError(false);
+        setAiLoading(false);
+      });
   }, [active, data, ageKey]);
 
   const sections = DASH_SECTIONS.filter(s => {
@@ -1558,24 +1632,24 @@ function CycleDashboard({ data, onBack, onUpdate, onWeeklyCheckin, ageKey, onRef
               <div style={{display:"flex",alignItems:"center",gap:"12px",marginBottom:"18px",position:"relative"}}>
                 <div style={{width:"38px",height:"38px",borderRadius:"12px",background:"linear-gradient(135deg,#ffd700,#f5a623)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"18px",flexShrink:0,boxShadow:"0 4px 14px rgba(220,160,20,0.45)"}}>✨</div>
                 <div>
-                  <div style={{fontFamily:"'Playfair Display',serif",fontSize:"17px",fontWeight:"900",color:"#3d1a00"}}>AI Wellness Recommendations</div>
-                  <div style={{fontSize:"11px",color:"rgba(0,0,0,0.35)",fontWeight:"600",fontFamily:"'Nunito',sans-serif"}}>Personalised by AI · based on your cycle data</div>
+                  <div style={{fontFamily:"'Playfair Display',serif",fontSize:"17px",fontWeight:"900",color:"#3d1a00"}}>Wellness Recommendations</div>
+                  <div style={{fontSize:"11px",color:"rgba(0,0,0,0.35)",fontWeight:"600",fontFamily:"'Nunito',sans-serif"}}>Personalised from your cycle data</div>
                 </div>
-                <div style={{marginLeft:"auto",padding:"3px 10px",borderRadius:"20px",background:"linear-gradient(135deg,rgba(255,215,0,0.25),rgba(245,166,35,0.2))",border:"1px solid rgba(220,170,30,0.35)",fontSize:"9px",fontWeight:"900",color:"#b87000",fontFamily:"'Nunito',sans-serif",letterSpacing:"1px"}}>AI</div>
+                <div style={{marginLeft:"auto",padding:"3px 10px",borderRadius:"20px",background:"linear-gradient(135deg,rgba(255,215,0,0.25),rgba(245,166,35,0.2))",border:"1px solid rgba(220,170,30,0.35)",fontSize:"9px",fontWeight:"900",color:"#b87000",fontFamily:"'Nunito',sans-serif",letterSpacing:"1px"}}>SMART</div>
               </div>
               {aiLoading && (
                 <div style={{display:"flex",flexDirection:"column",gap:"10px"}}>
                   {[1,2,3,4].map(i=>(
                     <div key={i} className="ai-skeleton" style={{height:"52px",animationDelay:`${i*0.1}s`}}/>
                   ))}
-                  <div style={{textAlign:"center",fontSize:"11px",color:"rgba(0,0,0,0.35)",fontFamily:"'Nunito',sans-serif",fontWeight:"700",marginTop:"4px"}}>✨ AI is personalising your advice…</div>
+                  <div style={{textAlign:"center",fontSize:"11px",color:"rgba(0,0,0,0.35)",fontFamily:"'Nunito',sans-serif",fontWeight:"700",marginTop:"4px"}}>Personalising your advice...</div>
                 </div>
               )}
               {aiError && (
                 <div style={{background:"rgba(220,170,30,0.1)",borderRadius:"12px",padding:"16px",textAlign:"center"}}>
                   <div style={{fontSize:"22px",marginBottom:"8px"}}>⚠️</div>
                   <p style={{fontSize:"12px",color:"rgba(0,0,0,0.45)",fontWeight:"600",margin:0,fontFamily:"'Nunito',sans-serif"}}>
-                    AI advice unavailable. Check your <code>VITE_OPENROUTER_API_KEY</code> in <code>.env</code> and restart.
+                    Showing backup recommendations from your cycle data.
                   </p>
                 </div>
               )}
@@ -1592,23 +1666,6 @@ function CycleDashboard({ data, onBack, onUpdate, onWeeklyCheckin, ageKey, onRef
               )}
             </div>
 
-            {data.shouldSeeDoctor && (
-              <div style={{background:"linear-gradient(135deg,rgba(163,45,45,0.12),rgba(220,90,48,0.08))",borderRadius:"18px",padding:"22px 24px",border:"1.5px solid rgba(163,45,45,0.3)",boxShadow:"0 6px 24px rgba(163,45,45,0.12)",marginTop:"16px"}}>
-                <div style={{display:"flex",alignItems:"flex-start",gap:"12px",marginBottom:"16px"}}>
-                  <div style={{fontSize:"26px",flexShrink:0}}>🚨</div>
-                  <div>
-                    <div style={{fontSize:"12px",fontWeight:"900",color:"#a32d2d",fontFamily:"'Nunito',sans-serif",letterSpacing:"1px",marginBottom:"5px"}}>DOCTOR CONSULTATION RECOMMENDED</div>
-                    <p style={{fontSize:"13px",color:"rgba(0,0,0,0.65)",lineHeight:1.7,margin:0,fontFamily:"'DM Sans',sans-serif",fontWeight:"500"}}>
-                      Based on your cycle patterns — irregular cycles, possible anovulation, or frequent spotting — we strongly recommend consulting a gynecologist.
-                    </p>
-                  </div>
-                </div>
-                <div style={{display:"flex",gap:"10px"}}>
-                  <button onClick={()=>window.open("https://wa.me/?text=Hi%2C+I+need+help+with+PCOD","_blank")} style={{flex:1,padding:"11px",border:"none",borderRadius:"12px",background:"linear-gradient(135deg,#25D366,#128C7E)",color:"#fff",fontWeight:"800",fontSize:"12px",cursor:"pointer",fontFamily:"'Nunito',sans-serif"}}>💬 Chat with Expert</button>
-                  <button onClick={()=>window.open("https://www.practo.com/","_blank")} style={{flex:1,padding:"11px",border:"none",borderRadius:"12px",background:"linear-gradient(135deg,#a32d2d,#e24b4a)",color:"#fff",fontWeight:"800",fontSize:"12px",cursor:"pointer",fontFamily:"'Nunito',sans-serif"}}>📅 Book Consultation</button>
-                </div>
-              </div>
-            )}
           </div>
         )}
 

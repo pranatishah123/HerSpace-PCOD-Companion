@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import bg from "../assets/bg.jpg";
 
-export default function Login({ onLoginSuccess, onLoginFail, onGoSignup }) {
+export default function Login({ onLoginSuccess, onLoginFail, onGoSignup, onDoctorLogin }) {
   const [form, setForm]       = useState({ email: "", password: "" });
   const [error, setError]     = useState("");
   const [loading, setLoading] = useState(false);
@@ -121,6 +121,14 @@ export default function Login({ onLoginSuccess, onLoginFail, onGoSignup }) {
           <h2 style={S.title}>Welcome Back!</h2>
           <p style={S.sub}>Continue your wellness journey 🌸</p>
         </div>
+        <div style={S.roleRow}>
+          <button type="button" style={{...S.roleBtn, ...S.roleBtnActive}}>
+            Patient
+          </button>
+          <button type="button" onClick={onDoctorLogin} style={S.roleBtn}>
+            Doctor
+          </button>
+        </div>
         <div style={S.field}>
           <label style={S.label}>Email Address</label>
           <input name="email" value={form.email} onChange={handle}
@@ -175,6 +183,27 @@ const S = {
   emoji: { fontSize: "48px", marginBottom: "8px" },
   title: { fontSize: "26px", fontWeight: "900", color: "#1a1a2e", margin: "0 0 6px" },
   sub: { fontSize: "14px", color: "#888", margin: 0 },
+  roleRow: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "8px",
+    marginBottom: "18px",
+  },
+  roleBtn: {
+    border: "1.5px solid rgba(205,44,88,0.18)",
+    borderRadius: "14px",
+    padding: "10px 12px",
+    background: "rgba(255,255,255,0.62)",
+    color: "#8b4f68",
+    fontWeight: "800",
+    cursor: "pointer",
+  },
+  roleBtnActive: {
+    background: "linear-gradient(135deg,#ff7aa8,#b565a7)",
+    color: "#fff",
+    border: "none",
+    cursor: "default",
+  },
   field: { marginBottom: "16px" },
   label: { display: "block", fontSize: "13px", fontWeight: "600", color: "#555", marginBottom: "6px" },
   input: {
