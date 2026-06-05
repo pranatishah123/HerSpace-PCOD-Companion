@@ -224,10 +224,15 @@ The Consultation Snapshot helps users present their health journey in an organiz
 * Backend: Node.js hosting platform
 * Database: MongoDB Atlas
 
+
 ---
+
+
 
 ## 📁 Project Structure
 
+
+```bash
 HerSpace-build-a-thon/
 │
 ├── client/
@@ -249,6 +254,8 @@ HerSpace-build-a-thon/
 │
 ├── README.md
 └── package.json
+
+```
 
 ---
 
