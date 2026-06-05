@@ -511,15 +511,6 @@ export default function App() {
               <button style={S.loginBtn} onClick={() => { setAuthScreen("login"); setActive("auth"); }}>
                 Login
               </button>
-              <button
-                style={S.doctorBtn}
-                onClick={() => {
-                  setStoredRole("doctor");
-                  goToDoctorRoute("/doctor-login");
-                }}
-              >
-                Doctor Dashboard
-              </button>
               <button style={S.signupBtn} onClick={() => { setAuthScreen("signup"); setActive("auth"); }}>
                 Sign Up
               </button>
