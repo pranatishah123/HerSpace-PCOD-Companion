@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { apiUrl } from "../config/api";
 import bg from "../assets/bg.jpg";
 
 export default function Login({ onLoginSuccess, onLoginFail, onGoSignup, onDoctorLogin }) {
@@ -77,7 +78,7 @@ export default function Login({ onLoginSuccess, onLoginFail, onGoSignup, onDocto
     setError("");
 
     try {
-      const response = await fetch("http://localhost:5000/api/auth/login", {
+      const response = await fetch(apiUrl("/api/auth/login"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include", // ✅ allows cookie to be saved from backend

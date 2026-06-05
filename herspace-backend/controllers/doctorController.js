@@ -136,4 +136,141 @@ const getMyDoctorRequest = async (req, res) => {
   }
 };
 
-module.exports = { listDoctorRequests, respondToDoctorRequest, getMyDoctorRequest };
+function softenCareWording(text = "") {
+  return String(text || "")
+    .replace(/High-Risk Events/g, "Attention Points")
+    .replace(/Risk Events/g, "Attention Points")
+    .replace(/high-risk events/g, "attention points")
+    .replace(/risk events/g, "attention points")
+    .replace(/Risk Score/g, "Wellness Score")
+    .replace(/Risk score/g, "Wellness score")
+    .replace(/risk score/g, "wellness score")
+    .replace(/CLINICAL PATTERNS/g, "OBSERVED PATTERNS")
+    .replace(/Clinical Patterns/g, "Observed Patterns")
+    .replace(/clinical patterns/g, "observed patterns")
+    .replace(/classic androgen excess pattern common in PCOD/gi, "pattern commonly discussed in PCOD care")
+    .replace(/classic androgen excess pattern/gi, "pattern commonly discussed in PCOD care")
+    .replace(/Hormonal link detected/g, "Possible pattern observed")
+    .replace(/hormonal link detected/gi, "possible pattern observed");
+}
+
+const generateDoctorAISummary = async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) {
+      return res.status(400).json({ message: "userId is required in body." });
+    }
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ message: "OpenRouter API key is not configured." });
+    }
+
+    const tracker = await ZonesTracker.findOne({ userId }).lean();
+    if (!tracker) {
+      return res.status(404).json({ message: "Patient zones tracker data not found." });
+    }
+
+    const latestRF = await RapidFire.findOne({ userId })
+      .sort({ createdAt: -1 })
+      .select("zone finalScore maxScore confidencePct detectedSymptoms lifestyleAnswers createdAt")
+      .lean();
+
+    const zone = tracker?.current?.zone || latestRF?.zone || "mild";
+    const score = tracker?.current?.finalScore ?? 0;
+    const maxScore = tracker?.current?.maxScore ?? 120;
+    const symptoms = (tracker?.current?.detectedSymptoms || []).join(", ") || "none";
+    const stability = tracker?.actionPlan?.stabilityScore || "Stable";
+
+    const patternsData = buildRapidFirePatterns(latestRF);
+    const patterns = (patternsData || []).map((p) => softenCareWording(p.title)).join(", ") || "none";
+
+    const miniCheckin = tracker?.miniCheckin;
+    const miniSummary = miniCheckin
+      ? `Energy: ${miniCheckin.energy || "?"}, Symptoms: ${miniCheckin.symptoms || "?"}, Skin: ${miniCheckin.skin || "?"}, Stress: ${miniCheckin.stress || "?"}, Overall: ${miniCheckin.overall || "?"}`
+      : "No mini check-in data";
+    const historyCount = (tracker?.history || []).length;
+    const highRiskEvents = (tracker?.riskEvents || []).filter((e) => e.level === "high").length;
+
+    const prompt = `You are a clinical wellness AI assistant helping a gynecologist prepare for a PCOD patient consultation.
+
+Patient Data:
+- Zone: ${zone} (${ZONE_DISPLAY_NAMES[zone] || zone})
+- Wellness Score: ${score}/${maxScore}
+- Trend Stability: ${stability}
+- Detected Symptoms: ${symptoms}
+- Observed Patterns: ${patterns}
+- Mini Check-in: ${miniSummary}
+- Total Assessments: ${historyCount + 1}
+- Attention Points: ${highRiskEvents}
+
+Write a concise clinical consultation prep note (3-4 sentences) that:
+1. Summarizes the patient's current PCOD wellness picture
+2. Highlights the most relevant observed patterns
+3. Suggests what the doctor should focus on in the consultation
+
+Be clinical but warm. No diagnosis. Return ONLY a plain paragraph, no JSON, no bullet points.`;
+
+    const DOCTOR_AI_MODELS = [
+      "google/gemma-3-12b-it:free",
+      "mistralai/mistral-7b-instruct:free",
+      "meta-llama/llama-3.1-8b-instruct:free",
+      "google/gemma-3-4b-it:free",
+      "google/gemma-2-9b-it:free",
+      "meta-llama/llama-3.2-3b-instruct:free",
+    ];
+
+    let summaryText = null;
+    let lastErr = null;
+
+    for (const model of DOCTOR_AI_MODELS) {
+      try {
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+            "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:5173",
+            "X-Title": "HerSpace Doctor Dashboard",
+          },
+          body: JSON.stringify({
+            model,
+            messages: [{ role: "user", content: prompt }],
+            max_tokens: 300,
+            temperature: 0.6,
+          }),
+        });
+
+        const data = await response.json();
+        if (data?.error) {
+          throw new Error(data.error.message || `API error for model ${model}`);
+        }
+
+        const text = data?.choices?.[0]?.message?.content?.trim();
+        if (text && text.length > 20) {
+          summaryText = softenCareWording(text);
+          break;
+        }
+      } catch (err) {
+        console.error(`AI model ${model} failed:`, err.message);
+        lastErr = err;
+      }
+    }
+
+    if (summaryText) {
+      return res.status(200).json({ success: true, summary: summaryText });
+    } else {
+      console.error("All AI models failed to generate summary:", lastErr?.message);
+      return res.status(502).json({ message: "AI consultation prep is temporarily unavailable." });
+    }
+  } catch (err) {
+    console.error("generateDoctorAISummary error:", err.message);
+    return res.status(500).json({ message: "Server error generating AI summary." });
+  }
+};
+
+module.exports = {
+  listDoctorRequests,
+  respondToDoctorRequest,
+  getMyDoctorRequest,
+  generateDoctorAISummary,
+};

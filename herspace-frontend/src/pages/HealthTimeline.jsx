@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
+import { apiUrl } from "../config/api";
 import timelineBg from "../assets/timeline-bg.jpg";
 import healthyZoneImg from "../assets/zones/Build Consistency.jpeg";
 import mildZoneImg from "../assets/zones/maintain & optimize.jpeg";
 import moderateZoneImg from "../assets/zones/stabilize & recover.jpeg";
 import highZoneImg from "../assets/zones/Support Sensitivity.jpeg";
-
-const API = "http://localhost:5000/api";
 
 const TYPE_CONFIG = {
   zone:          { label:"Zone Assessment",  icon:"🎯", accent:"#6a9a52", category:"WELLNESS ZONE"   },
@@ -488,7 +487,7 @@ export default function HealthTimeline({onBack}){
   useEffect(()=>{
     (async()=>{
       try{
-        const res=await fetch(`${API}/timeline/me`,{credentials:"include"});
+        const res=await fetch(apiUrl("/api/timeline/me"),{credentials:"include"});
         const data=await res.json();
         if(!res.ok) throw new Error(data.message||"Failed");
         setEvents(data.events||[]);

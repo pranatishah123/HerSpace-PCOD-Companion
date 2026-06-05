@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { apiUrl } from "./config/api";
 import logo from "./assets/logo.png";
 import bg from "./assets/bg.jpg";
 import sticker from "./assets/girl-sticker.png";
@@ -301,7 +302,7 @@ export default function App() {
         return;
       }
       try {
-        const res = await fetch("http://localhost:5000/api/auth/me", {
+        const res = await fetch(apiUrl("/api/auth/me"), {
           credentials: "include",
         });
         if (res.ok) {
@@ -353,7 +354,7 @@ export default function App() {
 
   const handleLoginSuccess = async () => {
     try {
-      const res = await fetch("http://localhost:5000/api/auth/me", {
+      const res = await fetch(apiUrl("/api/auth/me"), {
         credentials: "include",
       });
       if (res.ok) {
@@ -371,7 +372,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      await fetch("http://localhost:5000/api/auth/logout", {
+      await fetch(apiUrl("/api/auth/logout"), {
         method: "POST",
         credentials: "include",
       });

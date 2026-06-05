@@ -7,6 +7,7 @@ const {
   getWellnessScore,
   refreshWellnessScore,
   getScoreHistory,
+  generateDashboardAIInsight,
 } = require("../controllers/wellnessScoreController");
 
 // GET  /api/wellness/score         → get current dynamic score (always recalculates)
@@ -17,5 +18,8 @@ router.post("/score/refresh", protect, refreshWellnessScore);
 
 // GET  /api/wellness/score/history → score history for trend charts
 router.get("/score/history", protect, getScoreHistory);
+
+// POST /api/wellness/ai-dashboard-insight -> secure AI dashboard plan
+router.post("/ai-dashboard-insight", protect, generateDashboardAIInsight);
 
 module.exports = router;

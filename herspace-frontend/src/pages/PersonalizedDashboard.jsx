@@ -1,7 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-
-const API = "http://localhost:5000/api";
-const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
+import { apiUrl } from "../config/api";
 
 // ── Phase config ──────────────────────────────────────────────────────────────
 const PHASE_CONFIG = {
@@ -19,75 +17,33 @@ const ZONE_CONFIG = {
 };
 
 // ── AI helpers ────────────────────────────────────────────────────────────────
-const AI_MODELS = [
-  // Keep this short to avoid rate-limit bursts; we fall back between providers/models.
-  "google/gemma-3-4b-it:free",
-  "meta-llama/llama-3.2-3b-instruct:free",
-  "deepseek/deepseek-r1-distill-llama-8b:free",
-];
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-async function tryAIModel(model, messages) {
-  if (!OPENROUTER_KEY) throw new Error("Missing VITE_OPENROUTER_API_KEY (restart the dev server after adding it).");
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method:"POST",
-    headers:{ "Content-Type":"application/json","Authorization":`Bearer ${OPENROUTER_KEY}`,"HTTP-Referer":window.location.origin,"X-Title":"HerSpace Wellness" },
-    body: JSON.stringify({ model, messages, max_tokens:700, temperature:0.7 }),
-  });
-  const data = await res.json();
-  if (data.error) {
-    const suffix = res.status ? ` (HTTP ${res.status})` : "";
-    const hint =
-      res.status === 404
-        ? " If you're using free models, check OpenRouter privacy/provider settings (Free model publication) or try a different model."
-        : "";
-    const e = new Error(`${data.error.message}${suffix}${hint}`);
-    e.is429 = data.error.code===429 || res.status === 429;
-    throw e;
-  }
-  return data?.choices?.[0]?.message?.content || "{}";
-}
-
 async function fetchPersonalizedPlan(profileData) {
-  const { zone, phase, skinCondition, stability, trackerData } = profileData;
-  const messages = [{
-    role:"user",
-    content:`You are a warm women's wellness AI for a PCOD wellness app.
-User profile:
-- PCOD Zone: ${zone}
-- Cycle Phase: ${phase}
-- Skin Condition: ${skinCondition || "not analyzed"}
-- Stability: ${stability || "Stable"}
-- Regularity: ${trackerData?.regularity || "unknown"}
-- Flow: ${trackerData?.flow || "unknown"}
+  const res = await fetch(apiUrl("/api/wellness/ai-dashboard-insight"), {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(profileData),
+  });
 
-Generate a unified today's wellness plan. Return ONLY valid JSON (no markdown):
-{
-  "greeting": "1 warm personalized sentence about their current state",
-  "diet": ["tip1","tip2","tip3"],
-  "movement": ["tip1","tip2"],
-  "selfCare": ["tip1","tip2"],
-  "skinTip": "1 skin tip based on their condition + cycle phase",
-  "insight": "1 short motivational insight about their health journey"
-}`
-  }];
+  let data = null;
+  try { data = await res.json(); } catch { data = null; }
 
-  let lastErr;
-  for (const model of AI_MODELS) {
-    try {
-      const text  = await tryAIModel(model, messages);
-      const clean = text.replace(/```json|```/g,"").trim();
-      return JSON.parse(clean);
-    } catch(e) {
-      lastErr = e;
-      // If we're rate-limited, don't spam additional models immediately.
-      if (e?.is429) break;
-      // Small backoff between models to reduce burstiness.
-      await sleep(450);
-    }
+  if (!res.ok) {
+    throw new Error(data?.message || `AI request failed (HTTP ${res.status || "?"})`);
   }
-  throw lastErr || new Error("AI unavailable");
+
+  if (
+    typeof data?.greeting !== "string" ||
+    !Array.isArray(data?.diet) ||
+    !Array.isArray(data?.movement) ||
+    !Array.isArray(data?.selfCare) ||
+    typeof data?.skinTip !== "string" ||
+    typeof data?.insight !== "string"
+  ) {
+    throw new Error("AI response had an unexpected format");
+  }
+
+  return data;
 }
 
 // ── Score Ring ────────────────────────────────────────────────────────────────
@@ -226,10 +182,10 @@ export default function PersonalizedDashboard({ userData, onNavigate, onBack }) 
     (async () => {
       try {
         const [periodRes, zonesRes, skinRes, wellnessRes] = await Promise.allSettled([
-          fetch(`${API}/period/dashboard`,    { credentials:"include" }),
-          fetch(`${API}/zones/me`,            { credentials:"include" }),
-          fetch(`${API}/skin/history`,        { credentials:"include" }),
-          fetch(`${API}/wellness/score`,      { credentials:"include" }), // NEW — dynamic score
+          fetch(apiUrl("/api/period/dashboard"),    { credentials:"include" }),
+          fetch(apiUrl("/api/zones/me"),            { credentials:"include" }),
+          fetch(apiUrl("/api/skin/history"),        { credentials:"include" }),
+          fetch(apiUrl("/api/wellness/score"),      { credentials:"include" }), // NEW — dynamic score
         ]);
 
         const periodData  = periodRes.status==="fulfilled"  && periodRes.value.ok  ? await periodRes.value.json()  : null;
@@ -237,7 +193,7 @@ export default function PersonalizedDashboard({ userData, onNavigate, onBack }) 
         const skinData    = skinRes.status==="fulfilled"    && skinRes.value.ok    ? await skinRes.value.json()    : null;
         const wellScore   = wellnessRes.status==="fulfilled" && wellnessRes.value.ok ? await wellnessRes.value.json() : null;
 
-        setDashData({ period:periodData, zones:zonesData, skin:skinData });
+        setDashData({ period:periodData, zones:zonesData, skin:skinData, wellness:wellScore });
         if (wellScore?.success) setWellnessData(wellScore);
       } catch(e) { console.error(e); }
       finally {
@@ -258,7 +214,17 @@ export default function PersonalizedDashboard({ userData, onNavigate, onBack }) 
     aiFetched.current = true;
     setAiLoading(true);
     setAiError("");
-    fetchPersonalizedPlan({ zone:zoneKey, phase, skinCondition:skinCond, stability, trackerData })
+    fetchPersonalizedPlan({
+      zone: zoneKey,
+      phase,
+      skinCondition: skinCond,
+      stability,
+      trackerData,
+      wellnessData: dashData.wellness,
+      period: dashData.period,
+      zones: dashData.zones,
+      skin: dashData.skin,
+    })
       .then(plan => { setAiPlan(plan); setAiLoading(false); })
       .catch((e) => { setAiError(e?.message ? String(e.message) : "AI request failed."); setAiLoading(false); });
   }, [dashData]);

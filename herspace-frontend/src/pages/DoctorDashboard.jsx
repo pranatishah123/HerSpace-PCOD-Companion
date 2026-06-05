@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { apiUrl } from "../config/api";
+import berryBg from "../assets/bg.jpg";
 
-const API = "http://localhost:5000/api";
-const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
-const BERRY_BG = "/@fs/C:/Users/BHARAT S SHAH/.cursor/projects/c-Users-BHARAT-S-SHAH-herspace-frontend/assets/c__Users_BHARAT_S_SHAH_AppData_Roaming_Cursor_User_workspaceStorage_b863f0322bfffd5a39f017174614a988_images_WhatsApp_Image_2026-04-16_at_21.03.30-24281b9f-47e2-42be-abad-1bae861e30f1.png";
+const BERRY_BG = berryBg;
 const CONSULTATION_REQUESTS_KEY = "herspaceConsultationRequests";
 
 const ZONE_LABEL_BY_KEY = {
@@ -32,12 +32,7 @@ function readLocalConsultationRequests() {
   }
 }
 
-const AI_MODELS = [
-  "google/gemma-3-12b-it:free",
-  "mistralai/mistral-7b-instruct:free",
-  "meta-llama/llama-3.1-8b-instruct:free",
-  "google/gemma-3-4b-it:free",
-];
+
 
 function softenCareWording(text = "") {
   return String(text || "")
@@ -58,61 +53,24 @@ function softenCareWording(text = "") {
 }
 
 async function generateAISummary(patient) {
-  const zone = patient?.current?.zone || patient?.zoneDisplayName || "mild";
-  const score = patient?.current?.finalScore ?? 0;
-  const maxScore = patient?.current?.maxScore ?? 120;
-  const symptoms = (patient?.current?.detectedSymptoms || []).join(", ") || "none";
-  const stability = patient?.actionPlan?.stabilityScore || "Stable";
-  const patterns = (patient?.patterns || []).map((p) => softenCareWording(p.title)).join(", ") || "none";
-  const miniCheckin = patient?.miniCheckin;
-  const miniSummary = miniCheckin
-    ? `Energy: ${miniCheckin.energy || "?"}, Symptoms: ${miniCheckin.symptoms || "?"}, Skin: ${miniCheckin.skin || "?"}, Stress: ${miniCheckin.stress || "?"}, Overall: ${miniCheckin.overall || "?"}`
-    : "No mini check-in data";
-  const historyCount = (patient?.history || []).length;
-  const highRiskEvents = (patient?.riskEvents || []).filter((e) => e.level === "high").length;
-
-  const prompt = `You are a clinical wellness AI assistant helping a gynecologist prepare for a PCOD patient consultation.
-
-Patient Data:
-- Zone: ${zone} (${ZONE_LABEL_BY_KEY[zone] || zone})
-- Wellness Score: ${score}/${maxScore}
-- Trend Stability: ${stability}
-- Detected Symptoms: ${symptoms}
-- Observed Patterns: ${patterns}
-- Mini Check-in: ${miniSummary}
-- Total Assessments: ${historyCount + 1}
-- Attention Points: ${highRiskEvents}
-
-Write a concise clinical consultation prep note (3-4 sentences) that:
-1. Summarizes the patient's current PCOD wellness picture
-2. Highlights the most relevant observed patterns
-3. Suggests what the doctor should focus on in the consultation
-
-Be clinical but warm. No diagnosis. Return ONLY a plain paragraph, no JSON, no bullet points.`;
-
-  for (const model of AI_MODELS) {
-    try {
-      const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${OPENROUTER_KEY}`,
-          "HTTP-Referer": window.location.origin,
-          "X-Title": "HerSpace Doctor Dashboard",
-        },
-        body: JSON.stringify({
-          model,
-          messages: [{ role: "user", content: prompt }],
-          max_tokens: 300,
-          temperature: 0.6,
-        }),
-      });
-      const data = await res.json();
-      const text = data?.choices?.[0]?.message?.content?.trim();
-      if (text && text.length > 20) return text;
-    } catch {}
+  try {
+    const res = await fetch(apiUrl("/api/doctor/ai-summary"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-doctor-auth": window.localStorage.getItem("doctorAuth") === "true" || document.cookie.includes("herspaceDoctorAuth=true") ? "true" : "",
+      },
+      body: JSON.stringify({ userId: patient.userId }),
+    });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return data.summary || null;
+  } catch (err) {
+    console.error("Failed to generate AI summary from backend:", err);
+    return null;
   }
-  return null;
 }
 
 function buildFallbackSummary(patient) {
@@ -339,7 +297,7 @@ export default function DoctorDashboard({ onBack, onLogout, fallbackPatient }) {
       const localRequests = readLocalConsultationRequests();
       try {
         setAuthError("");
-        const res = await fetch(`${API}/doctor/requests`, {
+        const res = await fetch(apiUrl("/api/doctor/requests"), {
           credentials: "include",
           headers: { "x-doctor-auth": window.localStorage.getItem("doctorAuth") === "true" || document.cookie.includes("herspaceDoctorAuth=true") ? "true" : "" },
         });

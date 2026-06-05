@@ -1,11 +1,10 @@
 import React, { useEffect, useState, useRef } from "react";
+import { apiUrl } from "../config/api";
 import healthyImg  from "../assets/zones/Build Consistency.jpeg";
 import mildImg     from "../assets/zones/maintain & optimize.jpeg";
 import moderateImg from "../assets/zones/stabilize & recover.jpeg";
 import highImg     from "../assets/zones/Support Sensitivity.jpeg";
 
-const API = "http://localhost:5000/api";
-const OPENROUTER_KEY = import.meta.env.VITE_OPENROUTER_API_KEY;
 const CONSULTATION_REQUESTS_KEY = "herspaceConsultationRequests";
 
 function readConsultationRequests() {
@@ -31,57 +30,24 @@ function hasConsultationRequest(patientId) {
   );
 }
 
-const AI_MODELS = [
-  "google/gemma-3-4b-it:free",
-  "google/gemma-3-12b-it:free",
-  "mistralai/mistral-7b-instruct:free",
-  "meta-llama/llama-3.1-8b-instruct:free",
-  "meta-llama/llama-3.2-3b-instruct:free",
-  "deepseek/deepseek-r1-distill-llama-8b:free",
-  "qwen/qwen3-4b:free",
-];
-
-async function tryAIModel(model, messages) {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+async function fetchZoneAIInsight(payload, validator) {
+  const res = await fetch(apiUrl("/api/zones/ai-insight"), {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENROUTER_KEY}`,
-      "HTTP-Referer": window.location.origin,
-      "X-Title": "HerSpace Zone Report",
-    },
-    body: JSON.stringify({ model, messages, max_tokens: 900, temperature: 0.7 }),
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
   });
 
-  let data;
+  let data = null;
   try { data = await res.json(); } catch { data = null; }
-  if (!res.ok || data?.error) {
-    const msg = data?.error?.message || `AI request failed (HTTP ${res.status || "?"})`;
-    const hint =
-      res.status === 404
-        ? " If you're using free models, check OpenRouter privacy/provider settings (Free model publication) or try a different model."
-        : "";
-    const err = new Error(`${msg}${hint}`);
-    err.is429 = data?.error?.code === 429 || res.status === 429;
-    throw err;
-  }
 
-  return data?.choices?.[0]?.message?.content || "{}";
-}
-
-async function runAIJson(messages, validator) {
-  let lastError;
-  for (const model of AI_MODELS) {
-    try {
-      const text = await tryAIModel(model, messages);
-      const clean = text.replace(/```json|```/g, "").trim();
-      const parsed = JSON.parse(clean);
-      if (validator(parsed)) return parsed;
-    } catch (error) {
-      lastError = error;
-    }
+  if (!res.ok) {
+    throw new Error(data?.message || `AI request failed (HTTP ${res.status || "?"})`);
   }
-  throw lastError || new Error("AI unavailable");
+  if (!validator(data)) {
+    throw new Error("AI response had an unexpected format");
+  }
+  return data;
 }
 
 function buildInsightFallback(zoneKey) {
@@ -338,7 +304,7 @@ function MiniCheckinModal({ zc, onClose, onSubmit }) {
     if (!allAnswered) return;
     setSubmitting(true); setError(null);
     try {
-      const res  = await fetch(`${API}/zones/mini`, { method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(answers) });
+      const res  = await fetch(apiUrl("/api/zones/mini"), { method:"POST", credentials:"include", headers:{"Content-Type":"application/json"}, body:JSON.stringify(answers) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || "Submission failed");
       onSubmit(data);
@@ -455,7 +421,7 @@ function ZoneDashboard({ tracker, zc, daysData, onMiniCheckin, onFullCheckin, cu
   };
 
   useEffect(() => {
-    if (!current?.zone || !OPENROUTER_KEY) {
+    if (!current?.zone) {
       setAiPlan(null);
       return;
     }
@@ -463,29 +429,17 @@ function ZoneDashboard({ tracker, zc, daysData, onMiniCheckin, onFullCheckin, cu
     let alive = true;
     setAiPlanLoading(true);
 
-    runAIJson(
-      [{
-        role: "user",
-        content: `You are a warm women's wellness guide for a PCOD app.
-Current zone: ${current.zone}
-Current score: ${current.finalScore ?? 0}
-Detected symptoms: ${(current.detectedSymptoms || []).join(", ") || "none"}
-Stability: ${stability}
-Latest mini check-in:
-- Energy: ${localTracker?.miniCheckin?.energy || "unknown"}
-- Symptoms: ${localTracker?.miniCheckin?.symptoms || "unknown"}
-- Skin: ${localTracker?.miniCheckin?.skin || "unknown"}
-- Stress: ${localTracker?.miniCheckin?.stress || "unknown"}
-- Overall: ${localTracker?.miniCheckin?.overall || "unknown"}
-
-Return ONLY valid JSON:
-{
-  "diet": ["tip1","tip2","tip3"],
-  "movement": ["tip1","tip2","tip3"],
-  "selfCare": ["tip1","tip2","tip3"],
-  "insight": "one warm human sentence"
-}`,
-      }],
+    fetchZoneAIInsight(
+      {
+        kind: "action-plan",
+        current: {
+          zone: current.zone,
+          finalScore: current.finalScore ?? 0,
+          detectedSymptoms: current.detectedSymptoms || [],
+        },
+        stability,
+        miniCheckin: localTracker?.miniCheckin || null,
+      },
       (parsed) => Array.isArray(parsed?.diet) && Array.isArray(parsed?.movement) && Array.isArray(parsed?.selfCare)
     )
       .then((plan) => {
@@ -734,35 +688,16 @@ function AIInsightsSection({ zc, zoneKey, score, confidencePct, detected, lifest
   useEffect(()=>{
     let alive = true;
 
-    if (!OPENROUTER_KEY) {
-      setInsights(buildInsightFallback(zoneKey));
-      setLoading(false);
-      return () => {
-        alive = false;
-      };
-    }
-
     setLoading(true);
-    runAIJson(
-      [{
-        role: "user",
-        content: `You are a compassionate women's health AI for a PCOD wellness app.
-Zone: ${zoneKey}
-Score: ${score}
-Confidence: ${confidencePct}%
-Symptoms: ${(detected || []).join(", ") || "none"}
-Lifestyle: ${(lifestyleAnswers || []).map((item) => `${item.question}: ${item.answer}`).join("; ") || "none"}
-
-Return ONLY valid JSON:
-{
-  "summary": "one warm summary sentence",
-  "insights": [
-    {"title":"...","body":"...","icon":"🌸"},
-    {"title":"...","body":"...","icon":"💡"},
-    {"title":"...","body":"...","icon":"🌿"}
-  ]
-}`,
-      }],
+    fetchZoneAIInsight(
+      {
+        kind: "insights",
+        zoneKey,
+        score,
+        confidencePct,
+        detected: detected || [],
+        lifestyleAnswers: lifestyleAnswers || [],
+      },
       (parsed) => typeof parsed?.summary === "string" && Array.isArray(parsed?.insights) && parsed.insights.length > 0
     )
       .then((parsed) => {
@@ -821,7 +756,7 @@ export default function ZoneReport({ result, onGoToDashboard, currentUser }) {
 
   // On mount: READ ONLY — just fetch current tracker, do NOT sync here
   useEffect(() => {
-    fetch(`${API}/zones/me`, { credentials:"include" })
+    fetch(apiUrl("/api/zones/me"), { credentials:"include" })
       .then(r => r.json())
       .then(data => {
         if (data.hasZones && data.tracker) {
@@ -888,9 +823,9 @@ export default function ZoneReport({ result, onGoToDashboard, currentUser }) {
     try {
       if (!syncedRef.current) {
         syncedRef.current = true;
-        await fetch(`${API}/zones/sync`, { method:"POST", credentials:"include", headers:{"Content-Type":"application/json"} });
+        await fetch(apiUrl("/api/zones/sync"), { method:"POST", credentials:"include", headers:{"Content-Type":"application/json"} });
       }
-      const res  = await fetch(`${API}/zones/me`, { credentials:"include" });
+      const res  = await fetch(apiUrl("/api/zones/me"), { credentials:"include" });
       const data = await res.json();
       if (data.hasZones && data.tracker) {
         setTracker(data.tracker);

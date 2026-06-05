@@ -420,6 +420,106 @@ Each tip should be 1 warm, actionable sentence. All tips must be PCOD-specific a
 // ════════════════════════════════════════════════════════════════════════════
 // POST /api/period
 // ════════════════════════════════════════════════════════════════════════════
+function parseRecommendationArray(text) {
+  const clean = String(text || "").replace(/```json|```/g, "").trim();
+  const parsed = JSON.parse(clean);
+  if (!Array.isArray(parsed)) {
+    throw new Error("AI response was not a recommendation array");
+  }
+  return parsed
+    .map((item) => String(item || "").trim())
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
+// POST /api/period/ai-insight
+const generatePeriodAIInsight = async (req, res) => {
+  try {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ message: "Period AI service is not configured." });
+    }
+
+    const {
+      trackerData = {},
+      phase = "Luteal",
+      comparison = null,
+      ageGroup = "unknown",
+    } = req.body || {};
+
+    if (!trackerData || typeof trackerData !== "object") {
+      return res.status(400).json({ message: "trackerData is required." });
+    }
+
+    const previous = comparison?.previousCycle;
+    const prevText = previous
+      ? `Previous cycle: regularity=${previous.regularity}, cycleLength=${previous.cycleLength}, flow=${previous.flow}, pain=${previous.pain}`
+      : "First assessment - no previous cycle data.";
+
+    const prompt = `You are a compassionate PCOD health advisor for a women's wellness app.
+
+A woman with PCOD has tracked her period. Here is her data:
+- Age Group: ${ageGroup}
+- Current Phase: ${phase}
+- Regularity: ${trackerData.regularity}
+- Cycle Length: ${trackerData.cycleLength}
+- Flow: ${trackerData.flow}
+- Spotting: ${trackerData.spotting}
+- Skin: ${trackerData.skin}
+- Hair: ${trackerData.hair}
+- Weight: ${trackerData.weight}
+- Sleep: ${trackerData.sleep}
+- Ovulation: ${trackerData.ovulation}
+- Pain: ${trackerData.pain}
+- ${prevText}
+
+Give exactly 4 PCOD-specific health recommendations tailored to her current cycle phase (${phase}). Each should be 1-2 warm, actionable sentences.
+
+Return ONLY a JSON array of 4 strings. No markdown, no extra text.
+Example: ["tip1", "tip2", "tip3", "tip4"]`;
+
+    let lastErr;
+    const rateLimited = [];
+
+    for (const model of AI_MODELS) {
+      try {
+        aiDebug("Trying period insight AI model:", model);
+        const text = await tryModel(model, prompt, apiKey);
+        const recommendations = parseRecommendationArray(text);
+        if (recommendations.length) {
+          return res.status(200).json({ recommendations });
+        }
+      } catch (err) {
+        aiDebugWarn("Period insight AI model failed:", model, err.message);
+        lastErr = err;
+        if (err.is429) rateLimited.push(model);
+      }
+    }
+
+    if (rateLimited.length > 0) {
+      aiDebug("Retrying rate-limited period insight AI models in 4s");
+      await sleep(4000);
+      for (const model of rateLimited) {
+        try {
+          const text = await tryModel(model, prompt, apiKey);
+          const recommendations = parseRecommendationArray(text);
+          if (recommendations.length) {
+            return res.status(200).json({ recommendations });
+          }
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+    }
+
+    console.error("generatePeriodAIInsight failed:", lastErr?.message || "All models unavailable");
+    return res.status(502).json({ message: "AI recommendations are temporarily unavailable." });
+  } catch (err) {
+    console.error("generatePeriodAIInsight error:", err.message);
+    return res.status(500).json({ message: "Server error generating AI recommendations." });
+  }
+};
+
 const savePeriodTracker = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -829,4 +929,5 @@ module.exports = {
   getPeriodTracker,
   submitWeeklyCheckin,
   getActionPlan,
+  generatePeriodAIInsight,
 };

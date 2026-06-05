@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import axios from "axios";
+import { apiUrl } from "../config/api";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import dashBg from "../assets/dashboard.png";
@@ -488,7 +489,7 @@ export default function RapidFire({ userData, onGoToZoneReport }) {
         severity: symAnswers[q.id]?.severity ?? 0,
       }));
       const { data } = await axios.post(
-        "http://localhost:5000/api/rapidfire",
+        apiUrl("/api/rapidfire"),
         { ageGroup: ageKey, symptomAnswers, lifestyleAnswers: finalLifAnswers },
         { withCredentials: true }
       );

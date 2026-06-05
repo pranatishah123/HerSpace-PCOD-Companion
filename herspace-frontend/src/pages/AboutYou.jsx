@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { apiUrl } from "../config/api";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import dashBg from "../assets/dashboard.png";
@@ -45,7 +46,7 @@ export default function AboutYou({ onComplete, onBack }) {
   useEffect(() => {
     const verifyAuth = async () => {
       try {
-        const res = await fetch("http://localhost:5000/api/auth/me", {
+        const res = await fetch(apiUrl("/api/auth/me"), {
           credentials: "include",
         });
         if (!res.ok) { onBack(); return; }
@@ -83,7 +84,7 @@ export default function AboutYou({ onComplete, onBack }) {
     const cat = form.ageGroup;
 
     try {
-      const res = await fetch("http://localhost:5000/api/about", {
+      const res = await fetch(apiUrl("/api/about"), {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -102,7 +103,7 @@ export default function AboutYou({ onComplete, onBack }) {
       // ✅ FIX: 409 means profile already exists — use PUT to update instead
       if (res.status === 409) {
         // Profile already exists — try updating it with new data
-        const putRes = await fetch("http://localhost:5000/api/about", {
+        const putRes = await fetch(apiUrl("/api/about"), {
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },

@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
+import { apiUrl } from "../config/api";
 import periodBg   from "../assets/period-bg.png";
 import periodGirl from "../assets/period-girl.png";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
-
-const API = "http://localhost:5000/api";
 
 // ── Age-aware PCOD options ────────────────────────────────────────────────────
 const REGULARITY_OPTS = [
@@ -457,49 +456,7 @@ const CSS = `
 `;
 
 // ── ✅ FIXED: Multi-model OpenRouter AI with fallback ─────────────────────────
-const AI_MODELS = [
-  "deepseek/deepseek-r1-distill-llama-70b:free",
-  "deepseek/deepseek-chat-v3-0324:free",
-  "mistralai/mistral-small-3.1-24b-instruct:free",
-  "qwen/qwen-2.5-72b-instruct:free",
-  "google/gemma-3-4b-it:free",
-  "google/gemma-2-9b-it:free",
-  "meta-llama/llama-3.2-3b-instruct:free",
-];
-
-const sleep = (ms) => new Promise(res => setTimeout(res, ms));
-const aiDebug = (...args) => {
-  if (import.meta.env.VITE_DEBUG_AI === "true") console.log(...args);
-};
-const aiDebugWarn = (...args) => {
-  if (import.meta.env.VITE_DEBUG_AI === "true") console.warn(...args);
-};
-
-async function tryAIModel(model, messages, key) {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${key}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": window.location.origin,
-      "X-Title": "HerSpace Period Tracker",
-    },
-    body: JSON.stringify({ model, messages, temperature: 0.7, max_tokens: 500 }),
-  });
-  let data;
-  try { data = await res.json(); } catch { data = null; }
-  if (!res.ok || data?.error) {
-    const msg = data?.error?.message || `Model error (HTTP ${res.status || "?"})`;
-    const hint =
-      res.status === 404
-        ? " If you're using free models, check OpenRouter privacy/provider settings (Free model publication) or try a different model."
-        : "";
-    const err = new Error(`${msg}${hint}`);
-    err.is429 = data?.error?.code === 429 || res.status === 429;
-    throw err;
-  }
-  return data?.choices?.[0]?.message?.content || "[]";
-}
+// AI recommendations are requested through the backend so the API key never reaches the browser.
 
 function getLocalWellnessRecommendations(trackerData = {}, phase = "Luteal", comparison = null) {
   const phaseBased = {
@@ -568,75 +525,33 @@ function getLocalWellnessRecommendations(trackerData = {}, phase = "Luteal", com
 
 async function fetchAIRecommendations(trackerData, phase, comparison, ageGroup) {
   const fallback = getLocalWellnessRecommendations(trackerData, phase, comparison);
-  const key = import.meta.env.VITE_OPENROUTER_API_KEY;
-  if (!key || typeof fetch !== "function") return fallback;
+  if (typeof fetch !== "function") return fallback;
 
-  const prevText = comparison
-    ? `Previous cycle: regularity=${comparison.previousCycle?.regularity}, cycleLength=${comparison.previousCycle?.cycleLength}, flow=${comparison.previousCycle?.flow}, pain=${comparison.previousCycle?.pain}`
-    : "First assessment — no previous cycle data.";
+  try {
+    const res = await fetch(apiUrl("/api/period/ai-insight"), {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trackerData, phase, comparison, ageGroup }),
+    });
 
-  const messages = [{
-    role: "user",
-    content: `You are a compassionate PCOD health advisor for a women's wellness app.
+    let data = null;
+    try { data = await res.json(); } catch { data = null; }
 
-A woman with PCOD has tracked her period. Here is her data:
-- Age Group: ${ageGroup}
-- Current Phase: ${phase}
-- Regularity: ${trackerData.regularity}
-- Cycle Length: ${trackerData.cycleLength}
-- Flow: ${trackerData.flow}
-- Spotting: ${trackerData.spotting}
-- Skin: ${trackerData.skin}
-- Hair: ${trackerData.hair}
-- Weight: ${trackerData.weight}
-- Sleep: ${trackerData.sleep}
-- Ovulation: ${trackerData.ovulation}
-- Pain: ${trackerData.pain}
-- ${prevText}
-
-Give exactly 4 PCOD-specific health recommendations tailored to her current cycle phase (${phase}). Each should be 1-2 warm, actionable sentences.
-
-Return ONLY a JSON array of 4 strings. No markdown, no extra text.
-Example: ["tip1", "tip2", "tip3", "tip4"]`,
-  }];
-
-  let lastErr;
-  const rateLimited = [];
-
-  for (const model of AI_MODELS) {
-    try {
-      aiDebug("Trying AI model:", model);
-      const text  = await tryAIModel(model, messages, key);
-      const clean = text.replace(/```json|```/g, "").trim();
-      const arr   = JSON.parse(clean);
-      if (Array.isArray(arr) && arr.length) {
-        aiDebug("AI model succeeded:", model);
-        return arr;
-      }
-    } catch (e) {
-      aiDebugWarn("AI model failed:", model, e.message);
-      lastErr = e;
-      if (e.is429) rateLimited.push(model);
+    if (!res.ok) {
+      throw new Error(data?.message || `AI request failed (HTTP ${res.status || "?"})`);
     }
+
+    const recs = Array.isArray(data?.recommendations)
+      ? data.recommendations.map((item) => String(item || "").trim()).filter(Boolean)
+      : [];
+
+    return recs.length ? recs : fallback;
+  } catch (err) {
+    console.warn("Using local wellness recommendations:", err?.message || "AI unavailable");
+    return fallback;
   }
 
-  if (rateLimited.length > 0) {
-    aiDebug("Retrying rate-limited AI models in 4s");
-    await sleep(4000);
-    for (const model of rateLimited) {
-      try {
-        const text  = await tryAIModel(model, messages, key);
-        const clean = text.replace(/```json|```/g, "").trim();
-        const arr   = JSON.parse(clean);
-        if (Array.isArray(arr) && arr.length) return arr;
-      } catch (e) {
-        lastErr = e;
-      }
-    }
-  }
-
-  aiDebugWarn("Using local wellness recommendations:", lastErr?.message || "All models unavailable");
-  return fallback;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -709,7 +624,7 @@ export default function PeriodTracker({ userData, onBack }) {
   useEffect(() => {
     (async () => {
       try {
-        const res  = await fetch(`${API}/period/me`, { credentials:"include" });
+        const res  = await fetch(apiUrl("/api/period/me"), { credentials:"include" });
         const data = await res.json();
         if (!data.hasTracker) { setView("intro"); return; }
         setCheckinInfo(data);
@@ -747,7 +662,7 @@ export default function PeriodTracker({ userData, onBack }) {
 
   const loadDashboard = async () => {
     try {
-      const res  = await fetch(`${API}/period/dashboard`, { credentials:"include" });
+      const res  = await fetch(apiUrl("/api/period/dashboard"), { credentials:"include" });
       const data = await res.json();
       setDashData(data);
       setView("dashboard");
@@ -813,7 +728,7 @@ export default function PeriodTracker({ userData, onBack }) {
       style:{ borderRadius:"16px", background:"linear-gradient(135deg,#ffd700,#f5a623)", color:"#5a3000", fontWeight:"800", fontFamily:"'Nunito',sans-serif" },
     });
     try {
-      const saveRes = await fetch(`${API}/period`, {
+      const saveRes = await fetch(apiUrl("/api/period"), {
         method:"POST", credentials:"include",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
@@ -829,7 +744,7 @@ export default function PeriodTracker({ userData, onBack }) {
       }
 
       // ── Day 0 fix: auto-generate first action plan immediately after 12Q save ──
-      const weeklyRes = await fetch(`${API}/period/weekly`, {
+      const weeklyRes = await fetch(apiUrl("/api/period/weekly"), {
         method:"POST", credentials:"include",
         headers:{ "Content-Type":"application/json" },
         body: JSON.stringify({
@@ -868,7 +783,7 @@ export default function PeriodTracker({ userData, onBack }) {
     setWeeklySubmitting(true);
     setWeeklyStep(3);
     try {
-      const res = await fetch(`${API}/period/weekly`, {
+      const res = await fetch(apiUrl("/api/period/weekly"), {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
@@ -1373,7 +1288,7 @@ function CycleDashboard({ data, onBack, onUpdate, onWeeklyCheckin, ageKey, onRef
     if (active !== "skin" || skinFetched) return;
     setSkinFetched(true);
     setSkinLoading(true);
-    fetch(`${API}/skin/history`, { credentials: "include" })
+    fetch(apiUrl("/api/skin/history"), { credentials: "include" })
       .then(r => r.json())
       .then(d => {
         setSkinHistory(d.entries || []);

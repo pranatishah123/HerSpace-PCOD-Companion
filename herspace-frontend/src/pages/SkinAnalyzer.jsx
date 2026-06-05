@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
 import axios from "axios";
+import { apiUrl } from "../config/api";
 import { toast, ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import skinBg from "../assets/skin-bg.jpeg";
@@ -73,7 +74,7 @@ function UploadPage({ onAnalyze, onBack }) {
       const formData = new FormData();
       formData.append("image", image);
       const { data } = await axios.post(
-        "http://localhost:5000/api/skin/analyze",
+        apiUrl("/api/skin/analyze"),
         formData,
         { withCredentials: true }
       );
@@ -489,7 +490,7 @@ export default function SkinAnalyzer({ onBack }) {
     window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       const { data: historyData } = await axios.get(
-        "http://localhost:5000/api/skin/history", { withCredentials: true }
+        apiUrl("/api/skin/history"), { withCredentials: true }
       );
       if (historyData?.patternInsight?.detected) setPatternInsight(historyData.patternInsight);
     } catch (e) { /* non-blocking */ }

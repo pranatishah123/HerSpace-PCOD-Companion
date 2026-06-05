@@ -5,6 +5,7 @@ const {
   listDoctorRequests,
   respondToDoctorRequest,
   getMyDoctorRequest,
+  generateDoctorAISummary,
 } = require("../controllers/doctorController");
 const protect = require("../middleware/authMiddleware");
 
@@ -27,6 +28,6 @@ router.get("/me", protect, getMyDoctorRequest);
 // Production should replace this with verified onboarding, RBAC, and consent checks.
 router.get("/requests", requireDoctorDemoAccess, listDoctorRequests);
 router.post("/requests/:userId/respond", requireDoctorDemoAccess, express.json(), respondToDoctorRequest);
+router.post("/ai-summary", requireDoctorDemoAccess, express.json(), generateDoctorAISummary);
 
 module.exports = router;
-

@@ -1,8 +1,6 @@
 const ZonesTracker = require("../models/ZonesTracker");
 const RapidFire    = require("../models/RapidFire");
 
-const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY;
-
 const ZONE_DISPLAY_NAMES = {
   healthy: "stabilize and recover",
   mild: "support sensitivity",
@@ -40,10 +38,15 @@ const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
 
 // ── Try a single AI model ──────────────────────────────────────────────────────
 async function tryModel(model, prompt) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("OpenRouter API key is not configured");
+  }
+
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${OPENROUTER_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
       "HTTP-Referer": process.env.FRONTEND_URL || "http://localhost:5173",
       "X-Title": "HerSpace Zones Tracker",
@@ -893,8 +896,95 @@ const getZonesHistory = async (req, res) => {
 };
 
 // ══════════════════════════════════════════════════════════════════════════════
-// GET /api/zones/ai-insights
+// POST /api/zones/ai-insight
 // ══════════════════════════════════════════════════════════════════════════════
+const generateZoneAIInsight = async (req, res) => {
+  try {
+    if (!process.env.OPENROUTER_API_KEY) {
+      return res.status(500).json({ message: "Zone AI service is not configured." });
+    }
+
+    const {
+      kind,
+      current = {},
+      stability = "Stable",
+      miniCheckin = null,
+      zoneKey = current?.zone || "mild",
+      score = current?.finalScore ?? 0,
+      confidencePct = current?.confidencePct ?? 0,
+      detected = current?.detectedSymptoms || [],
+      lifestyleAnswers = [],
+    } = req.body || {};
+
+    if (kind === "action-plan") {
+      const zone = current?.zone || zoneKey || "mild";
+      const detectedSymptoms = Array.isArray(current?.detectedSymptoms)
+        ? current.detectedSymptoms
+        : [];
+      const prompt = `You are a warm women's wellness guide for a PCOD app.
+Current zone: ${zone}
+Current score: ${current?.finalScore ?? score ?? 0}
+Detected symptoms: ${detectedSymptoms.join(", ") || "none"}
+Stability: ${stability}
+Latest mini check-in:
+- Energy: ${miniCheckin?.energy || "unknown"}
+- Symptoms: ${miniCheckin?.symptoms || "unknown"}
+- Skin: ${miniCheckin?.skin || "unknown"}
+- Stress: ${miniCheckin?.stress || "unknown"}
+- Overall: ${miniCheckin?.overall || "unknown"}
+
+Return ONLY valid JSON:
+{
+  "diet": ["tip1","tip2","tip3"],
+  "movement": ["tip1","tip2","tip3"],
+  "selfCare": ["tip1","tip2","tip3"],
+  "insight": "one warm human sentence"
+}`;
+
+      const plan = await runAI(
+        prompt,
+        (parsed) => Array.isArray(parsed?.diet) && Array.isArray(parsed?.movement) && Array.isArray(parsed?.selfCare)
+      );
+      return res.status(200).json(plan);
+    }
+
+    if (kind === "insights") {
+      const detectedSymptoms = Array.isArray(detected) ? detected : [];
+      const lifestyleSummary = Array.isArray(lifestyleAnswers) && lifestyleAnswers.length > 0
+        ? lifestyleAnswers.map((item) => `${item.question}: ${item.answer}`).join("; ")
+        : "none";
+      const prompt = `You are a compassionate women's health AI for a PCOD wellness app.
+Zone: ${zoneKey || "mild"}
+Score: ${score ?? 0}
+Confidence: ${confidencePct ?? 0}%
+Symptoms: ${detectedSymptoms.join(", ") || "none"}
+Lifestyle: ${lifestyleSummary}
+
+Return ONLY valid JSON:
+{
+  "summary": "one warm summary sentence",
+  "insights": [
+    {"title":"...","body":"...","icon":"🌸"},
+    {"title":"...","body":"...","icon":"💡"},
+    {"title":"...","body":"...","icon":"🌿"}
+  ]
+}`;
+
+      const insights = await runAI(
+        prompt,
+        (parsed) => typeof parsed?.summary === "string" && Array.isArray(parsed?.insights) && parsed.insights.length > 0
+      );
+      return res.status(200).json(insights);
+    }
+
+    return res.status(400).json({ message: "Invalid zone AI insight kind." });
+  } catch (err) {
+    console.error("generateZoneAIInsight error:", err.message);
+    return res.status(502).json({ message: "AI insight is temporarily unavailable." });
+  }
+};
+
+// GET /api/zones/ai-insights
 const getAIInsights = async (req, res) => {
   try {
     const tracker = await ZonesTracker.findOne({ userId: req.user.id });
@@ -975,6 +1065,7 @@ module.exports = {
   getActionPlan,
   getZonesHistory,
   getAIInsights,
+  generateZoneAIInsight,
   fixHistory,
   enableDoctorCtaTest,
 };

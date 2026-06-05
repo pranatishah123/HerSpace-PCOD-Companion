@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from "react";
+import { apiUrl } from "../config/api";
 import sticker from "../assets/girl-sticker.png";
 import dashBg from "../assets/dashboard.png";
 import AboutYou from "./AboutYou";
 import RapidFire from "./RapidFire";
 import ViewProfile from "./ViewProfile";
 import PeriodTracker from "./PeriodTracker";
-import SkinAnalyzer from "./Skinanalyzer";
+import SkinAnalyzer from "./SkinAnalyzer";
 import PersonalizedDashboard from "./PersonalizedDashboard";
 import ZoneReport from "./ZoneReport";
 import HealthTimeline from "./HealthTimeline";
-const API = "http://localhost:5000/api";
 
 const ZONES = [
   {
@@ -188,10 +188,10 @@ function FlipZoneCard({ zone }) {
 async function checkAllFeaturesComplete() {
   try {
     const [aboutRes, zonesRes, periodRes, skinRes] = await Promise.allSettled([
-      fetch(`${API}/about/me`,       { credentials:"include" }),
-      fetch(`${API}/zones/me`,       { credentials:"include" }),
-      fetch(`${API}/period/me`,      { credentials:"include" }),
-      fetch(`${API}/skin/history`,   { credentials:"include" }),
+      fetch(apiUrl("/api/about/me"),       { credentials:"include" }),
+      fetch(apiUrl("/api/zones/me"),       { credentials:"include" }),
+      fetch(apiUrl("/api/period/me"),      { credentials:"include" }),
+      fetch(apiUrl("/api/skin/history"),   { credentials:"include" }),
     ]);
 
     const about  = aboutRes.status==="fulfilled"  && aboutRes.value.ok  ? await aboutRes.value.json()  : null;
@@ -229,7 +229,7 @@ export default function Dashboard({ onLogout, onGoToZoneReport, currentUser }) {
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch(`${API}/about/me`, { credentials:"include" });
+        const res = await fetch(apiUrl("/api/about/me"), { credentials:"include" });
         if (res.ok) {
           const data = await res.json();
           if (data.hasProfile) setUserData(data.profile);
@@ -262,7 +262,7 @@ export default function Dashboard({ onLogout, onGoToZoneReport, currentUser }) {
     }
 
     try {
-      const res = await fetch(`${API}/zones/me`, { credentials: "include" });
+      const res = await fetch(apiUrl("/api/zones/me"), { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
         const hasActiveZone =

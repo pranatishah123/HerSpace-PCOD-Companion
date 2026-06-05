@@ -6,6 +6,7 @@ const {
   getPeriodTracker,
   submitWeeklyCheckin,
   getActionPlan,
+  generatePeriodAIInsight,
 } = require("../controllers/periodTrackerController");
 const protect = require("../middleware/authMiddleware");
 
@@ -23,5 +24,8 @@ router.post("/weekly",        protect, submitWeeklyCheckin);
 
 // GET    /api/period/action-plan  — fetch latest AI action plan
 router.get("/action-plan",    protect, getActionPlan);
+
+// POST   /api/period/ai-insight   - generate cycle insight recommendations securely
+router.post("/ai-insight",    protect, generatePeriodAIInsight);
 
 module.exports = router;

@@ -1,5 +1,7 @@
 import React from "react";
-const BERRY_BG = "/@fs/C:/Users/BHARAT S SHAH/.cursor/projects/c-Users-BHARAT-S-SHAH-herspace-frontend/assets/c__Users_BHARAT_S_SHAH_AppData_Roaming_Cursor_User_workspaceStorage_b863f0322bfffd5a39f017174614a988_images_WhatsApp_Image_2026-04-16_at_21.03.30-24281b9f-47e2-42be-abad-1bae861e30f1.png";
+import berryBg from "../assets/bg.jpg";
+
+const BERRY_BG = berryBg;
 
 export default function DoctorConnect({ onBack, onOpenDoctorDashboard }) {
   const doctor = {

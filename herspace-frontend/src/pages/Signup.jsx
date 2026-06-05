@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { apiUrl } from "../config/api";
 import bg from "../assets/bg.jpg";
 
 export default function Signup({ onSignupSuccess, onGoLogin }) {
@@ -39,7 +40,7 @@ export default function Signup({ onSignupSuccess, onGoLogin }) {
     setError("");
 
     try {
-      const response = await fetch("http://localhost:5000/api/auth/signup", {
+      const response = await fetch(apiUrl("/api/auth/signup"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",

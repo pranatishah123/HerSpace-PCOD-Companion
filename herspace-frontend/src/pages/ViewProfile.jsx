@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { apiUrl } from "../config/api";
 import floralBg from "../assets/viewprofile.png";
 import {
   RiskScoreLineChart,
@@ -6,8 +7,6 @@ import {
   FeatureCompletionBarChart,
   ZoneIndexLineChart,
 } from "../components/profile/ProfileCharts";
-
-const API = "http://localhost:5000/api";
 
 const ZONE_LABELS = {
   healthy: "Stabilize & Recover",
@@ -385,11 +384,11 @@ export default function ViewProfile({ onBack, userData }) {
     (async () => {
       try {
         const [a, z, p, s, w] = await Promise.allSettled([
-          fetch(`${API}/about/me`, { credentials: "include" }),
-          fetch(`${API}/zones/me`, { credentials: "include" }),
-          fetch(`${API}/period/me`, { credentials: "include" }),
-          fetch(`${API}/skin/history`, { credentials: "include" }),
-          fetch(`${API}/wellness/score`, { credentials: "include" }),
+          fetch(apiUrl("/api/about/me"), { credentials: "include" }),
+          fetch(apiUrl("/api/zones/me"), { credentials: "include" }),
+          fetch(apiUrl("/api/period/me"), { credentials: "include" }),
+          fetch(apiUrl("/api/skin/history"), { credentials: "include" }),
+          fetch(apiUrl("/api/wellness/score"), { credentials: "include" }),
         ]);
 
         const parse = async (res) => (res.ok ? res.json() : null);

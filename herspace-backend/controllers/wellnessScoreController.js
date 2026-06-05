@@ -16,6 +16,89 @@ let PeriodTracker, SkinEntry;
 try { PeriodTracker = require("../models/PeriodTracker"); } catch(e) { PeriodTracker = null; }
 try { SkinEntry     = require("../models/SkinEntry");     } catch(e) { SkinEntry     = null; }
 
+const DASHBOARD_AI_MODELS = [
+  "google/gemma-3-4b-it:free",
+  "meta-llama/llama-3.2-3b-instruct:free",
+  "deepseek/deepseek-r1-distill-llama-8b:free",
+];
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function tryDashboardAIModel(model, prompt) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) {
+    throw new Error("OpenRouter API key is not configured");
+  }
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": process.env.FRONTEND_URL || process.env.CLIENT_URL || "http://localhost:5173",
+      "X-Title": "HerSpace Wellness",
+    },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: 700,
+      temperature: 0.7,
+    }),
+  });
+
+  let data = null;
+  try { data = await res.json(); } catch { data = null; }
+
+  if (!res.ok || data?.error) {
+    const err = new Error(data?.error?.message || `AI request failed (HTTP ${res.status || "?"})`);
+    err.is429 = data?.error?.code === 429 || res.status === 429;
+    throw err;
+  }
+
+  return data?.choices?.[0]?.message?.content || "{}";
+}
+
+function parseDashboardPlan(text) {
+  const clean = String(text || "").replace(/```json|```/g, "").trim();
+  const parsed = JSON.parse(clean);
+  if (
+    typeof parsed?.greeting !== "string" ||
+    !Array.isArray(parsed?.diet) ||
+    !Array.isArray(parsed?.movement) ||
+    !Array.isArray(parsed?.selfCare) ||
+    typeof parsed?.skinTip !== "string" ||
+    typeof parsed?.insight !== "string"
+  ) {
+    throw new Error("AI response had an unexpected format");
+  }
+
+  return {
+    greeting: parsed.greeting,
+    diet: parsed.diet.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 3),
+    movement: parsed.movement.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 2),
+    selfCare: parsed.selfCare.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 2),
+    skinTip: parsed.skinTip,
+    insight: parsed.insight,
+  };
+}
+
+async function runDashboardAI(prompt) {
+  let lastErr;
+
+  for (const model of DASHBOARD_AI_MODELS) {
+    try {
+      const text = await tryDashboardAIModel(model, prompt);
+      return parseDashboardPlan(text);
+    } catch (err) {
+      lastErr = err;
+      if (err?.is429) break;
+      await sleep(450);
+    }
+  }
+
+  throw lastErr || new Error("AI unavailable");
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // SCORING HELPERS
 // ══════════════════════════════════════════════════════════════════════════════
@@ -273,6 +356,64 @@ async function calculateAndSaveWellnessScore(userId) {
 // ROUTE HANDLERS
 // ══════════════════════════════════════════════════════════════════════════════
 
+// POST /api/wellness/ai-dashboard-insight
+const generateDashboardAIInsight = async (req, res) => {
+  try {
+    if (!process.env.OPENROUTER_API_KEY) {
+      return res.status(500).json({ message: "Dashboard AI service is not configured." });
+    }
+
+    const {
+      zone = "mild",
+      phase = "Luteal",
+      skinCondition = "not analyzed",
+      stability = "Stable",
+      trackerData = {},
+      wellnessData = null,
+      period = null,
+      zones = null,
+      skin = null,
+    } = req.body || {};
+
+    const score = wellnessData?.score ?? "unknown";
+    const components = wellnessData?.components || {};
+    const scoreInputs = wellnessData?.inputs || {};
+    const zoneSummary = zones?.tracker?.current || {};
+    const latestSkin = skin?.entries?.[0] || null;
+    const periodTracker = period?.trackerData || trackerData || {};
+
+    const prompt = `You are a warm women's wellness AI for a PCOD wellness app.
+User profile:
+- PCOD Zone: ${zone}
+- Cycle Phase: ${phase}
+- Skin Condition: ${skinCondition || latestSkin?.condition || "not analyzed"}
+- Stability: ${stability || "Stable"}
+- Regularity: ${periodTracker?.regularity || "unknown"}
+- Flow: ${periodTracker?.flow || "unknown"}
+- Wellness Score: ${score}/100
+- Component Scores: zone=${components.zoneScore ?? "unknown"}, cycle=${components.cycleScore ?? "unknown"}, habit=${components.consistencyScore ?? "unknown"}, skin=${components.skinScore ?? "unknown"}
+- Score Inputs: cycleRegularity=${scoreInputs.cycleRegularity || "unknown"}, skinCondition=${scoreInputs.skinCondition || "unknown"}
+- Zone Risk Score: ${zoneSummary.finalScore ?? "unknown"}
+- Detected Symptoms: ${(zoneSummary.detectedSymptoms || []).join(", ") || "none"}
+
+Generate a unified today's wellness plan. Return ONLY valid JSON (no markdown):
+{
+  "greeting": "1 warm personalized sentence about their current state",
+  "diet": ["tip1","tip2","tip3"],
+  "movement": ["tip1","tip2"],
+  "selfCare": ["tip1","tip2"],
+  "skinTip": "1 skin tip based on their condition + cycle phase",
+  "insight": "1 short motivational insight about their health journey"
+}`;
+
+    const plan = await runDashboardAI(prompt);
+    return res.status(200).json(plan);
+  } catch (err) {
+    console.error("generateDashboardAIInsight error:", err.message);
+    return res.status(502).json({ message: "AI dashboard insight is temporarily unavailable." });
+  }
+};
+
 // GET /api/wellness/score
 // Returns current score (recalculates live every time — always fresh)
 const getWellnessScore = async (req, res) => {
@@ -327,5 +468,6 @@ module.exports = {
   getWellnessScore,
   refreshWellnessScore,
   getScoreHistory,
+  generateDashboardAIInsight,
   calculateAndSaveWellnessScore, // exported so other controllers can call it
 };
