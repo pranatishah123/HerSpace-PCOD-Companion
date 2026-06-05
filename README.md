@@ -1,4 +1,4 @@
-# 🌸 HerSpace — PCOD Awareness & Health Tracking Platform
+# 🌸 HerSpace — PCOD/PCOS Awareness & Health Tracking Platform
 
 HerSpace is a women’s health-focused web platform designed to help users understand, track, and reflect on early body signals related to PCOD/PCOS.
 
