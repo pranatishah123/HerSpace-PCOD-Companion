@@ -1,6 +1,7 @@
 const User   = require("../models/User");
 const bcrypt = require("bcryptjs");
 const jwt    = require("jsonwebtoken");
+const axios  = require("axios");
 
 // ── COOKIE OPTIONS ────────────────────────────────────────────────────────────
 const isProduction = process.env.NODE_ENV === "production";
@@ -15,15 +16,15 @@ const COOKIE_OPTIONS = {
 const MAX_LOGIN_ATTEMPTS = 3;           // lock after 3 failed attempts
 const TURNSTILE_VERIFY_URL = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
 
+function shouldSkipCaptcha() {
+  return process.env.SKIP_CAPTCHA === "true";
+}
+
 const verifyTurnstileToken = async ({ token, ip }) => {
   const secret = process.env.TURNSTILE_SECRET_KEY;
   if (!secret) {
     throw new Error("TURNSTILE_SECRET_KEY is not configured");
   }
-  if (typeof fetch !== "function") {
-    throw new Error("Global fetch is unavailable in this Node runtime");
-  }
-
   const body = new URLSearchParams({
     secret,
     response: token,
@@ -33,28 +34,39 @@ const verifyTurnstileToken = async ({ token, ip }) => {
     body.append("remoteip", ip);
   }
 
-  const response = await fetch(TURNSTILE_VERIFY_URL, {
-    method: "POST",
+  const response = await axios.post(TURNSTILE_VERIFY_URL, body.toString(), {
+    validateStatus: () => true,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
   });
 
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     console.error("Turnstile verify failed with status:", response.status);
     return { success: false };
   }
 
-  const data = await response.json();
-  return { success: Boolean(data.success) };
+  return { success: Boolean(response.data?.success) };
 };
+async function validateCaptcha({ captchaToken, req }) {
+  if (shouldSkipCaptcha()) return null;
+  if (!captchaToken) return "Please complete captcha verification.";
+
+  const clientIp = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress;
+  const captcha = await verifyTurnstileToken({ token: captchaToken, ip: clientIp });
+  return captcha.success ? null : "Captcha verification failed. Please try again.";
+}
 
 // ── SIGNUP ────────────────────────────────────────────────────────────────────
 const signup = async (req, res) => {
   try {
-    const { name, email, password } = req.body;
+    const { name, email, password, captchaToken } = req.body;
 
     if (!name || !email || !password)
       return res.status(400).json({ message: "Please fill in all fields!" });
+
+    const captchaError = await validateCaptcha({ captchaToken, req });
+    if (captchaError) {
+      return res.status(400).json({ message: captchaError });
+    }
 
     if (password.length < 6)
       return res.status(400).json({ message: "Password must be at least 6 characters!" });
@@ -80,13 +92,12 @@ const login = async (req, res) => {
   try {
     const { email, password, captchaToken } = req.body;
 
-    if (!email || !password || !captchaToken)
+    if (!email || !password)
       return res.status(400).json({ message: "Please fill in all fields!" });
 
-    const clientIp = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket.remoteAddress;
-    const captcha = await verifyTurnstileToken({ token: captchaToken, ip: clientIp });
-    if (!captcha.success) {
-      return res.status(400).json({ message: "Captcha verification failed. Please try again." });
+    const captchaError = await validateCaptcha({ captchaToken, req });
+    if (captchaError) {
+      return res.status(400).json({ message: captchaError });
     }
 
     const user = await User.findOne({ email });
