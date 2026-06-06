@@ -10,9 +10,23 @@ export default function Login({ onLoginSuccess, onLoginFail, onGoSignup, onDocto
   const [captchaReady, setCaptchaReady] = useState(false);
   const captchaRef = useRef(null);
   const widgetIdRef = useRef(null);
-  const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || "YOUR_TURNSTILE_SITE_KEY";
+  const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || "";
+  const SKIP_CAPTCHA = import.meta.env.VITE_SKIP_CAPTCHA === "true";
+  const TURNSTILE_ALLOWED_HOSTS = new Set(["localhost", "127.0.0.1", "herspace0413.netlify.app"]);
+  const isTurnstileConfigured = Boolean(TURNSTILE_SITE_KEY);
+  const isTurnstileHostAllowed = TURNSTILE_ALLOWED_HOSTS.has(window.location.hostname);
 
   useEffect(() => {
+    if (SKIP_CAPTCHA) {
+      setCaptchaToken("demo-bypass");
+      setCaptchaReady(true);
+      return;
+    }
+    if (!isTurnstileConfigured || !isTurnstileHostAllowed) {
+      setCaptchaToken("");
+      setCaptchaReady(false);
+      return;
+    }
     if (!captchaRef.current) return;
 
     const renderTurnstile = () => {
@@ -56,7 +70,7 @@ export default function Login({ onLoginSuccess, onLoginFail, onGoSignup, onDocto
         window.turnstile.remove(widgetIdRef.current);
       }
     };
-  }, [TURNSTILE_SITE_KEY]);
+  }, [TURNSTILE_SITE_KEY, SKIP_CAPTCHA, isTurnstileConfigured, isTurnstileHostAllowed]);
 
   const handle = (e) => setForm({ ...form, [e.target.name]: e.target.value });
 
@@ -65,11 +79,15 @@ export default function Login({ onLoginSuccess, onLoginFail, onGoSignup, onDocto
       setError("Please fill in all fields! 🌸");
       return;
     }
-    if (TURNSTILE_SITE_KEY === "YOUR_TURNSTILE_SITE_KEY") {
+    if (!SKIP_CAPTCHA && !isTurnstileConfigured) {
       setError("Captcha is not configured yet. Add VITE_TURNSTILE_SITE_KEY.");
       return;
     }
-    if (!captchaToken) {
+    if (!SKIP_CAPTCHA && !isTurnstileHostAllowed) {
+      setError("Captcha domain is not allowed for this Turnstile site key.");
+      return;
+    }
+    if (!SKIP_CAPTCHA && !captchaToken) {
       setError("Please complete captcha verification.");
       return;
     }
@@ -82,7 +100,7 @@ export default function Login({ onLoginSuccess, onLoginFail, onGoSignup, onDocto
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include", // ✅ allows cookie to be saved from backend
-        body: JSON.stringify({ email: form.email, password: form.password, captchaToken }),
+        body: JSON.stringify({ email: form.email, password: form.password, captchaToken: SKIP_CAPTCHA ? "demo-bypass" : captchaToken }),
       });
 
       const data = await response.json();
@@ -91,10 +109,10 @@ export default function Login({ onLoginSuccess, onLoginFail, onGoSignup, onDocto
         // ✅ Cookie is automatically saved by browser — no localStorage needed!
         onLoginSuccess();
       } else {
-        if (window.turnstile && widgetIdRef.current !== null) {
+        if (!SKIP_CAPTCHA && window.turnstile && widgetIdRef.current !== null) {
           window.turnstile.reset(widgetIdRef.current);
         }
-        setCaptchaToken("");
+        setCaptchaToken(SKIP_CAPTCHA ? "demo-bypass" : "");
         // ❌ Wrong details → show error → back to Home
         setError(data.message || "Wrong email or password!");
         setTimeout(() => {
@@ -103,10 +121,10 @@ export default function Login({ onLoginSuccess, onLoginFail, onGoSignup, onDocto
       }
 
     } catch {
-      if (window.turnstile && widgetIdRef.current !== null) {
+      if (!SKIP_CAPTCHA && window.turnstile && widgetIdRef.current !== null) {
         window.turnstile.reset(widgetIdRef.current);
       }
-      setCaptchaToken("");
+      setCaptchaToken(SKIP_CAPTCHA ? "demo-bypass" : "");
       setError("Cannot connect to server. Is backend running?");
     } finally {
       setLoading(false);
@@ -140,14 +158,26 @@ export default function Login({ onLoginSuccess, onLoginFail, onGoSignup, onDocto
           <input name="password" value={form.password} onChange={handle}
             placeholder="Your password" type="password" style={S.input} />
         </div>
-        <div style={S.captchaWrap}>
-          <label style={S.label}>Human Verification</label>
-          <div ref={captchaRef} style={S.captchaBox} />
-        </div>
+        {SKIP_CAPTCHA ? (
+          <div style={S.demoCaptchaMsg}>Human verification skipped for demo mode.</div>
+        ) : (
+          <div style={S.captchaWrap}>
+            <label style={S.label}>Human Verification</label>
+            {isTurnstileConfigured && isTurnstileHostAllowed ? (
+              <div ref={captchaRef} style={S.captchaBox} />
+            ) : (
+              <div style={S.captchaNote}>
+                {isTurnstileConfigured
+                  ? "Turnstile is not enabled for this hostname."
+                  : "Turnstile site key is missing."}
+              </div>
+            )}
+          </div>
+        )}
 
         {error && <p style={S.errorMsg}>{error}</p>}
 
-        <button onClick={handleLogin} style={S.primaryBtn} disabled={loading || !captchaToken || !captchaReady}>
+        <button onClick={handleLogin} style={S.primaryBtn} disabled={loading || (!SKIP_CAPTCHA && (!captchaToken || !captchaReady))}>
           {loading ? "Checking... ⏳" : "Login & Continue 🌸"}
         </button>
         <p style={S.switchText}>
@@ -219,6 +249,31 @@ const S = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+  },
+  captchaNote: {
+    minHeight: "44px",
+    border: "1px solid rgba(205,44,88,0.16)",
+    borderRadius: "12px",
+    background: "rgba(255,240,245,0.7)",
+    color: "#8b4f68",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "12px",
+    fontWeight: "700",
+    textAlign: "center",
+    padding: "8px 12px",
+  },
+  demoCaptchaMsg: {
+    margin: "6px 0 8px",
+    border: "1px solid rgba(205,44,88,0.14)",
+    borderRadius: "12px",
+    background: "rgba(255,240,245,0.72)",
+    color: "#8b4f68",
+    fontSize: "12px",
+    fontWeight: "700",
+    textAlign: "center",
+    padding: "10px 12px",
   },
   errorMsg: {
     background: "rgba(255,100,100,0.1)", border: "1px solid rgba(255,100,100,0.3)",

@@ -58,6 +58,21 @@ const S = {
   },
 };
 
+const getEmailJSErrorMessage = (err) => {
+  const status = err?.status ? ` (${err.status})` : "";
+  const rawMessage = String(err?.text || err?.message || "").trim();
+
+  if (/gmail|service|stopped|unstable|failed/i.test(rawMessage)) {
+    return `Email service is currently unavailable${status}. Reconnect the Gmail service in EmailJS, then try again.`;
+  }
+
+  if (/public key|service id|template/i.test(rawMessage)) {
+    return `EmailJS configuration needs checking${status}. Verify the public key, service ID, and template ID.`;
+  }
+
+  return rawMessage || "Could not send message. Please try again.";
+};
+
 export default function ContactPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -97,6 +112,9 @@ export default function ContactPage() {
         {
           from_name: trimmedName,
           from_email: trimmedEmail,
+          reply_to: trimmedEmail,
+          user_name: trimmedName,
+          user_email: trimmedEmail,
           message: trimmedMessage,
         },
         publicKey
@@ -107,11 +125,7 @@ export default function ContactPage() {
       setMessage("");
     } catch (err) {
       console.error("EmailJS error:", err);
-      const msg =
-        typeof err?.text === "string"
-          ? err.text
-          : err?.message || "Could not send message. Please try again.";
-      toast.error(msg);
+      toast.error(getEmailJSErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -119,7 +133,12 @@ export default function ContactPage() {
 
   return (
     <section style={{ ...S.page, maxWidth: "500px", margin: "0 auto" }}>
-      <ToastContainer position="top-center" autoClose={3800} toastStyle={{ borderRadius: "16px", fontFamily: "'Segoe UI', sans-serif" }} />
+      <ToastContainer
+        position="top-center"
+        autoClose={4200}
+        style={{ top: "88px", zIndex: 2147483647 }}
+        toastStyle={{ borderRadius: "16px", fontFamily: "'Segoe UI', sans-serif" }}
+      />
       <h2 style={S.pageTitle}>
         Get In <span style={S.pink}>Touch</span>
       </h2>

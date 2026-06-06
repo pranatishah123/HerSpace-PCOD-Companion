@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { apiUrl } from "../config/api";
 import bg from "../assets/bg.jpg";
 
@@ -7,7 +7,16 @@ export default function Signup({ onSignupSuccess, onGoLogin }) {
   const [error, setError]     = useState("");
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState("");
+  const [captchaReady, setCaptchaReady] = useState(false);
+  const captchaRef = useRef(null);
+  const widgetIdRef = useRef(null);
+  const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY || "";
   const [showPassword, setShowPassword] = useState(false); // ✅ NEW: toggle visibility
+  const SKIP_CAPTCHA = import.meta.env.VITE_SKIP_CAPTCHA === "true";
+  const TURNSTILE_ALLOWED_HOSTS = ["localhost", "127.0.0.1", "herspace0413.netlify.app"];
+  const isTurnstileConfigured = Boolean(TURNSTILE_SITE_KEY);
+  const isTurnstileHostAllowed = TURNSTILE_ALLOWED_HOSTS.includes(window.location.hostname);
 
   const handle = (e) => setForm({ ...form, [e.target.name]: e.target.value });
   const hasLength = form.password.length >= 8;
@@ -22,6 +31,64 @@ export default function Signup({ onSignupSuccess, onGoLogin }) {
     { label: "One number", met: hasNumber },
   ];
 
+  useEffect(() => {
+    if (SKIP_CAPTCHA) {
+      setCaptchaToken("demo-bypass");
+      setCaptchaReady(true);
+      return;
+    }
+
+    if (!isTurnstileConfigured || !isTurnstileHostAllowed) {
+      setCaptchaToken("");
+      setCaptchaReady(false);
+      return;
+    }
+
+    if (!captchaRef.current) return;
+
+    const renderTurnstile = () => {
+      if (!window.turnstile || !captchaRef.current) return;
+      if (widgetIdRef.current !== null) {
+        window.turnstile.remove(widgetIdRef.current);
+        widgetIdRef.current = null;
+      }
+
+      widgetIdRef.current = window.turnstile.render(captchaRef.current, {
+        sitekey: TURNSTILE_SITE_KEY,
+        callback: (token) => {
+          setCaptchaToken(token);
+          setError("");
+        },
+        "expired-callback": () => {
+          setCaptchaToken("");
+        },
+        "error-callback": () => {
+          setCaptchaToken("");
+          setError("Captcha failed. Please retry.");
+        },
+      });
+      setCaptchaReady(true);
+    };
+
+    if (window.turnstile) {
+      renderTurnstile();
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.async = true;
+    script.defer = true;
+    script.onload = renderTurnstile;
+    document.head.appendChild(script);
+
+    return () => {
+      if (widgetIdRef.current !== null && window.turnstile) {
+        window.turnstile.remove(widgetIdRef.current);
+      }
+    };
+  }, [TURNSTILE_SITE_KEY, SKIP_CAPTCHA, isTurnstileConfigured, isTurnstileHostAllowed]);
+
   const handleSignup = async () => {
     if (!form.name || !form.email || !form.password) {
       setError("Please fill in all fields! 🌸");
@@ -35,6 +102,18 @@ export default function Signup({ onSignupSuccess, onGoLogin }) {
       setError("Use 8+ chars with one uppercase and one number. 🔒");
       return;
     }
+    if (!SKIP_CAPTCHA && !isTurnstileConfigured) {
+      setError("Captcha is not configured yet. Add VITE_TURNSTILE_SITE_KEY.");
+      return;
+    }
+    if (!SKIP_CAPTCHA && !isTurnstileHostAllowed) {
+      setError("Captcha domain is not allowed for this Turnstile site key.");
+      return;
+    }
+    if (!SKIP_CAPTCHA && !captchaToken) {
+      setError("Please complete captcha verification.");
+      return;
+    }
 
     setLoading(true);
     setError("");
@@ -44,7 +123,12 @@ export default function Signup({ onSignupSuccess, onGoLogin }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ name: form.name, email: form.email, password: form.password }),
+        body: JSON.stringify({
+          name: form.name,
+          email: form.email,
+          password: form.password,
+          captchaToken: SKIP_CAPTCHA ? "demo-bypass" : captchaToken,
+        }),
       });
 
       const data = await response.json();
@@ -55,10 +139,18 @@ export default function Signup({ onSignupSuccess, onGoLogin }) {
           onSignupSuccess();
         }, 1500);
       } else {
+        if (!SKIP_CAPTCHA && window.turnstile && widgetIdRef.current !== null) {
+          window.turnstile.reset(widgetIdRef.current);
+        }
+        setCaptchaToken(SKIP_CAPTCHA ? "demo-bypass" : "");
         setError(data.message || "Signup failed. Try again!");
       }
 
     } catch {
+      if (!SKIP_CAPTCHA && window.turnstile && widgetIdRef.current !== null) {
+        window.turnstile.reset(widgetIdRef.current);
+      }
+      setCaptchaToken(SKIP_CAPTCHA ? "demo-bypass" : "");
       setError("Cannot connect to server. Is backend running?");
     } finally {
       setLoading(false);
@@ -149,10 +241,26 @@ export default function Signup({ onSignupSuccess, onGoLogin }) {
           )}
         </div>
 
+        {SKIP_CAPTCHA ? (
+          <div style={S.demoCaptchaMsg}>Human verification skipped for demo mode.</div>
+        ) : (
+          <div style={S.captchaWrap}>
+            <label style={S.label}>Human Verification</label>
+            {isTurnstileConfigured && isTurnstileHostAllowed ? (
+              <div ref={captchaRef} style={S.captchaBox} />
+            ) : (
+              <div style={S.captchaNote}>
+                {isTurnstileConfigured
+                  ? "Turnstile is not enabled for this hostname."
+                  : "Turnstile site key is missing."}
+              </div>
+            )}
+          </div>
+        )}
         {error   && <p style={S.errorMsg}>{error}</p>}
         {success && <p style={S.successMsg}>Account created! Taking you to login... ✅</p>}
 
-        <button onClick={handleSignup} style={S.primaryBtn} disabled={loading || success}>
+        <button onClick={handleSignup} style={S.primaryBtn} disabled={loading || success || (!SKIP_CAPTCHA && (!captchaToken || !captchaReady))}>
           {loading ? "Creating... ⏳" : "Create Account 🚀"}
         </button>
         <p style={S.switchText}>
@@ -198,6 +306,27 @@ const S = {
     background: "rgba(255,255,255,0.7)", boxSizing: "border-box",
   },
   // ✅ NEW styles — only these were added
+  captchaWrap: { marginTop: "6px", marginBottom: "8px" },
+  captchaBox: {
+    minHeight: "66px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  captchaNote: {
+    minHeight: "44px",
+    border: "1px solid rgba(205,44,88,0.16)",
+    borderRadius: "12px",
+    background: "rgba(255,240,245,0.7)",
+    color: "#8b4f68",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "12px",
+    fontWeight: "700",
+    textAlign: "center",
+    padding: "8px 12px",
+  },
   pwWrap: {
     position: "relative", display: "flex", alignItems: "center",
   },
@@ -257,6 +386,17 @@ const S = {
     fontWeight: "700",
   },
   // end of new styles — rest unchanged
+  demoCaptchaMsg: {
+    margin: "6px 0 8px",
+    border: "1px solid rgba(205,44,88,0.14)",
+    borderRadius: "12px",
+    background: "rgba(255,240,245,0.72)",
+    color: "#8b4f68",
+    fontSize: "12px",
+    fontWeight: "700",
+    textAlign: "center",
+    padding: "10px 12px",
+  },
   errorMsg: {
     background: "rgba(255,100,100,0.1)", border: "1px solid rgba(255,100,100,0.3)",
     borderRadius: "10px", padding: "10px 14px",
