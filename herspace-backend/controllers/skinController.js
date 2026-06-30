@@ -132,8 +132,30 @@ async function callVisionAI({ imageUrl, mimeType, base64Image, promptText }) {
         }
 
         const content = data?.choices?.[0]?.message?.content;
-        if (content) return content;
 
+        // content is usually a string, but some models/routes return
+        // an array of content blocks instead, e.g. [{ type: "text", text: "..." }]
+        if (typeof content === "string" && content.trim()) {
+          return content;
+        }
+
+        if (Array.isArray(content)) {
+          const text = content
+            .map((block) => {
+              if (typeof block === "string") return block;
+              if (block?.type === "text" && typeof block.text === "string") return block.text;
+              return "";
+            })
+            .join("\n")
+            .trim();
+
+          if (text) return text;
+        }
+
+        console.warn(
+          "Unexpected content shape from OpenRouter:",
+          JSON.stringify(content)?.slice(0, 300)
+        );
         throw new Error(`OpenRouter response missing message content (model=${model})`);
       } catch (err) {
         lastErr = err;
